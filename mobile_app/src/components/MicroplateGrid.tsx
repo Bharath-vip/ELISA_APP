@@ -23,37 +23,36 @@ export const MicroplateGrid: React.FC<MicroplateGridProps> = ({
   const getWellStyle = (well?: WellResult) => {
     if (!well) {
       return {
-        bg: 'bg-slate-800/40 border-slate-700/50 text-slate-500',
+        bg: 'bg-slate-900/50 border-slate-800 text-slate-600',
         ring: '',
       };
     }
 
     const od = well.predictedOd;
     if (well.status === 'POSITIVE') {
-      // Scale red/amber intensity with OD
-      if (od >= 1.5) {
+      if (od >= 1.2) {
         return {
-          bg: 'bg-red-600 border-red-400 text-white shadow-[0_0_10px_rgba(239,68,68,0.5)]',
+          bg: 'bg-red-600 border-red-400 text-white shadow-[0_0_8px_rgba(239,68,68,0.4)]',
           ring: 'ring-red-400',
         };
       }
       return {
-        bg: 'bg-rose-500/80 border-rose-400 text-white',
+        bg: 'bg-rose-500 border-rose-300 text-white shadow-sm',
         ring: 'ring-rose-400',
       };
     }
 
     if (well.status === 'BORDERLINE') {
       return {
-        bg: 'bg-amber-500/80 border-amber-300 text-white',
+        bg: 'bg-amber-500 border-amber-300 text-slate-950 font-bold',
         ring: 'ring-amber-400',
       };
     }
 
-    // Negative safe wells (soft green)
+    // Negative wells: clean dark slate with subtle contrast
     return {
-      bg: 'bg-emerald-950/60 border-emerald-700/60 text-emerald-200',
-      ring: 'ring-emerald-400',
+      bg: 'bg-slate-900 border-slate-700/70 text-slate-300 hover:border-slate-500',
+      ring: 'ring-sky-400',
     };
   };
 

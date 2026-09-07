@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { X, CheckCircle, AlertTriangle, XCircle, Activity, Droplets } from 'lucide-react';
 import type { WellResult } from '../core/types';
 
@@ -46,11 +46,11 @@ export const WellDetailModal: React.FC<WellDetailModalProps> = ({ well, cutoff, 
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-4">
-          {/* Meniscus Zoom Image & OD Highlight */}
-          <div className="flex gap-3 items-center bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+        <div className="p-4 space-y-3.5">
+          {/* Well Crop Image & OD Highlight */}
+          <div className="flex gap-3.5 items-center bg-slate-950/50 p-3 rounded-xl border border-slate-800/90">
             {well.cropDataUrl ? (
-              <div className="w-20 h-20 rounded-full border-2 border-slate-600 overflow-hidden shrink-0 shadow-inner">
+              <div className="w-18 h-18 rounded-full border-2 border-slate-600/80 overflow-hidden shrink-0 shadow-inner bg-slate-900">
                 <img
                   src={well.cropDataUrl}
                   alt={`Well ${well.row}${well.col}`}
@@ -58,65 +58,80 @@ export const WellDetailModal: React.FC<WellDetailModalProps> = ({ well, cutoff, 
                 />
               </div>
             ) : (
-              <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center shrink-0">
-                <Droplets className="w-8 h-8 text-slate-500" />
+              <div className="w-18 h-18 rounded-full bg-slate-800 flex items-center justify-center shrink-0">
+                <Droplets className="w-7 h-7 text-slate-500" />
               </div>
             )}
 
-            <div className="flex-1">
-              <span className="text-xs text-slate-400 block font-medium">Predicted Optical Density</span>
-              <div className="text-2xl font-black text-white tracking-tight">
-                {well.predictedOd.toFixed(3)} <span className="text-sm font-semibold text-slate-400">OD</span>
+            <div className="flex-1 min-w-0">
+              <span className="text-[11px] text-slate-400 block font-medium uppercase tracking-wider">
+                Optical Density
+              </span>
+              <div className="text-2xl font-black text-white tracking-tight flex items-baseline gap-1.5">
+                {well.predictedOd.toFixed(3)}
+                <span className="text-xs font-semibold text-slate-400">OD</span>
               </div>
-              <div className="text-xs text-slate-400 mt-0.5">
-                Cutoff: <span className="font-semibold text-slate-200">{cutoff.toFixed(3)} OD</span> (
-                <span className={well.predictedOd > cutoff ? 'text-red-400 font-bold' : 'text-emerald-400 font-bold'}>
-                  {well.predictedOd > cutoff ? `+${(well.predictedOd - cutoff).toFixed(3)}` : `-${(cutoff - well.predictedOd).toFixed(3)}`}
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
+                <span>Cutoff: {cutoff.toFixed(3)}</span>
+                <span
+                  className={`text-[11px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                    well.predictedOd > cutoff
+                      ? 'bg-red-500/20 text-red-400'
+                      : 'bg-emerald-500/20 text-emerald-400'
+                  }`}
+                >
+                  {well.predictedOd > cutoff
+                    ? `+${(well.predictedOd - cutoff).toFixed(3)}`
+                    : `-${(cutoff - well.predictedOd).toFixed(3)}`}
                 </span>
-                )
               </div>
             </div>
           </div>
 
-          {/* Optical Physics Spectral Metrics */}
+          {/* Spectral Telemetry */}
           {well.features && (
             <div>
-              <span className="text-xs font-semibold text-slate-300 flex items-center gap-1 mb-2">
-                <Activity className="w-3.5 h-3.5 text-sky-400" /> Optical Spectral Physics
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
+                <Activity className="w-3 h-3 text-sky-400" /> Spectral Channels
               </span>
 
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="bg-slate-800/60 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block text-[10px]">Total Chroma (C*ab)</span>
-                  <span className="font-bold text-white">{(well.features.Chroma ?? 0).toFixed(2)}</span>
+                <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Chroma (C*ab)</span>
+                  <span className="font-mono font-bold text-white">{(well.features.Chroma ?? 0).toFixed(2)}</span>
                 </div>
-                <div className="bg-slate-800/60 p-2 rounded-lg border border-slate-800">
+                <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-800">
                   <span className="text-slate-400 block text-[10px]">Hue Angle (θab)</span>
-                  <span className="font-bold text-white">{(well.features.Hue_Angle ?? 0).toFixed(2)} rad</span>
+                  <span className="font-mono font-bold text-white">{(well.features.Hue_Angle ?? 0).toFixed(2)} rad</span>
                 </div>
-                <div className="bg-slate-800/60 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block text-[10px]">SSAI (Absorbance Index)</span>
-                  <span className="font-bold text-white">{(well.features.SSAI ?? 0).toFixed(3)}</span>
+                <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Absorbance Index (SSAI)</span>
+                  <span className="font-mono font-bold text-white">{(well.features.SSAI ?? 0).toFixed(3)}</span>
                 </div>
-                <div className="bg-slate-800/60 p-2 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block text-[10px]">Meniscus Depth Ratio</span>
-                  <span className="font-bold text-white">{(well.features.Meniscus_Depth_Ratio ?? 0).toFixed(2)}</span>
+                <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Meniscus Ratio</span>
+                  <span className="font-mono font-bold text-white">{(well.features.Meniscus_Depth_Ratio ?? 0).toFixed(2)}</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Clinical Interpretation Guidance */}
-          <div className={`p-2.5 rounded-lg border text-xs leading-relaxed ${isPos ? 'bg-red-950/30 border-red-900/40 text-red-200' : 'bg-emerald-950/30 border-emerald-900/40 text-emerald-200'}`}>
-            {isPos ? (
-              <p>
-                ⚠️ <strong>Pathogen Alert:</strong> Well absorption exceeds the negative control safety threshold. Viral antigens detected in sample.
-              </p>
-            ) : (
-              <p>
-                ✅ <strong>Negative Sample:</strong> Well optical density is within the baseline negative control range. Safe for biosecure pond stocking.
-              </p>
-            )}
+          {/* Clean Clinical Interpretation */}
+          <div
+            className={`p-2.5 rounded-xl border text-xs leading-relaxed flex items-start gap-2 ${
+              isPos
+                ? 'bg-red-950/30 border-red-900/40 text-red-200'
+                : isBorder
+                ? 'bg-amber-950/30 border-amber-900/40 text-amber-200'
+                : 'bg-emerald-950/30 border-emerald-900/40 text-emerald-200'
+            }`}
+          >
+            <StatusIcon className="w-4 h-4 shrink-0 mt-0.5" />
+            <p>
+              {isPos && 'Optical density exceeds diagnostic cutoff. Positive reaction.'}
+              {isBorder && 'Optical density is within borderline threshold range. Retesting advised.'}
+              {!isPos && !isBorder && 'Optical density is within baseline range. Negative reaction.'}
+            </p>
           </div>
         </div>
       </div>

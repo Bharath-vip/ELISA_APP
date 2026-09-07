@@ -12,6 +12,7 @@ import {
   Check,
   AlertCircle,
   CheckCircle2,
+  FlaskConical,
 } from 'lucide-react';
 import { processPlateImage, type FullAnalysisOutput, type AnalysisProgress } from './core/pipeline';
 import type { WellResult, DiagnosticsSummary } from './core/types';
@@ -25,9 +26,9 @@ import { generateClinicalPdfReport, downloadPdf } from './core/pdfGenerator';
 import { generatePlateCsv, downloadCsv, copyMatrixToClipboard } from './core/exportUtils';
 
 const SAMPLE_PLATES = [
-  { id: 'plate_0002_a', name: 'Plate 0002 (Test Plate)', path: '/sample_plates/plate_0002_a.jpg', cols: 11 },
-  { id: 'plate_0006_a', name: 'Plate 0006 (Test Plate)', path: '/sample_plates/plate_0006_a.jpg', cols: 10 },
-  { id: 'plate_0004_a', name: 'Plate 0004 (Control Plate)', path: '/sample_plates/plate_0004_a.jpg', cols: 12 },
+  { id: 'plate_0002_a', name: 'Plate 0002', path: '/sample_plates/plate_0002_a.jpg', cols: 11 },
+  { id: 'plate_0006_a', name: 'Plate 0006', path: '/sample_plates/plate_0006_a.jpg', cols: 10 },
+  { id: 'plate_0004_a', name: 'Plate 0004 (Control)', path: '/sample_plates/plate_0004_a.jpg', cols: 12 },
 ];
 
 export const App: React.FC = () => {
@@ -214,11 +215,11 @@ export const App: React.FC = () => {
         className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 pb-3 flex items-center justify-between shadow-sm"
       >
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center text-lg shadow-inner">
-            🦐
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-500/20 to-teal-500/20 border border-sky-500/30 text-sky-400 flex items-center justify-center shadow-inner">
+            <FlaskConical className="w-4 h-4 text-sky-400" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-tight leading-tight">ELISA Reader</h1>
+            <h1 className="text-sm font-bold text-white tracking-tight leading-tight">ELISA Analyzer</h1>
             <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Ready
             </span>
@@ -226,7 +227,7 @@ export const App: React.FC = () => {
         </div>
 
         <div className="text-right text-[11px] text-slate-400 font-mono">
-          <span className="text-slate-300 font-semibold block truncate max-w-[140px] bg-slate-800/60 px-2 py-0.5 rounded-md border border-slate-700/60">
+          <span className="text-slate-300 font-semibold block truncate max-w-[140px] bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 shadow-sm">
             {currentPlateTitle}
           </span>
         </div>
@@ -334,7 +335,7 @@ export const App: React.FC = () => {
                 {/* Clean Status Legend */}
                 <div className="flex justify-center gap-5 text-[11px] text-slate-400">
                   <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-600" />
                     <span>Negative</span>
                   </div>
                   <div className="flex items-center gap-1.5">
