@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Camera,
   Upload,
@@ -14,10 +14,13 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { processPlateImage, type FullAnalysisOutput, type AnalysisProgress } from './core/pipeline';
-import type { WellResult } from './core/types';
+import type { WellResult, DiagnosticsSummary } from './core/types';
+import { reevaluatePlateDiagnostics } from './core/diagnosticEngine';
 import { CameraModal } from './components/CameraModal';
 import { MicroplateGrid } from './components/MicroplateGrid';
 import { WellDetailModal } from './components/WellDetailModal';
+import { ZoomableImageViewer } from './components/ZoomableImageViewer';
+import { ManualCutoffControl } from './components/ManualCutoffControl';
 import { generateClinicalPdfReport, downloadPdf } from './core/pdfGenerator';
 import { generatePlateCsv, downloadCsv, copyMatrixToClipboard } from './core/exportUtils';
 
@@ -37,6 +40,13 @@ export const App: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState<'grid' | 'overlay' | 'matrix'>('grid');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [currentPlateTitle, setCurrentPlateTitle] = useState('Plate 0002');
+  const [currentSampleId, setCurrentSampleId] = useState('plate_0002_a');
+
+  // Manual Cutoff State
+  const [manualCutoff, setManualCutoff] = useState<number | null>(null);
+  const [autoCutoff, setAutoCutoff] = useState<number>(0.295);
+  const [baseResults, setBaseResults] = useState<WellResult[]>([]);
+  const [baseSummary, setBaseSummary] = useState<DiagnosticsSummary | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -46,6 +56,8 @@ export const App: React.FC = () => {
 
   const loadSamplePlate = async (sample: typeof SAMPLE_PLATES[0]) => {
     setCurrentPlateTitle(sample.name);
+    setCurrentSampleId(sample.id);
+    setManualCutoff(null);
     setProgress({ stage: 'detecting', message: 'Analyzing plate image...', progressPercent: 20 });
 
     const img = new Image();
@@ -55,6 +67,9 @@ export const App: React.FC = () => {
       try {
         const out = await processPlateImage(img, sample.cols, setProgress);
         setAnalysisOutput(out);
+        setBaseResults(out.results);
+        setBaseSummary(out.summary);
+        setAutoCutoff(out.summary.cutoffValue);
       } catch (err) {
         console.error('Inference error:', err);
       }
@@ -66,6 +81,7 @@ export const App: React.FC = () => {
     if (!file) return;
 
     setCurrentPlateTitle(file.name);
+    setManualCutoff(null);
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -74,6 +90,9 @@ export const App: React.FC = () => {
         try {
           const out = await processPlateImage(img, 10, setProgress);
           setAnalysisOutput(out);
+          setBaseResults(out.results);
+          setBaseSummary(out.summary);
+          setAutoCutoff(out.summary.cutoffValue);
         } catch (err) {
           console.error('Inference error:', err);
         }
@@ -84,12 +103,54 @@ export const App: React.FC = () => {
 
   const handleCameraCapture = async (canvas: HTMLCanvasElement) => {
     setCurrentPlateTitle('Camera Capture');
+    setManualCutoff(null);
     try {
       const out = await processPlateImage(canvas, 10, setProgress);
       setAnalysisOutput(out);
+      setBaseResults(out.results);
+      setBaseSummary(out.summary);
+      setAutoCutoff(out.summary.cutoffValue);
     } catch (err) {
       console.error('Inference error:', err);
     }
+  };
+
+  // Manual Cutoff Change Handler
+  const handleCutoffChange = (newCutoff: number) => {
+    if (!baseSummary || !analysisOutput) return;
+    setManualCutoff(newCutoff);
+
+    const reevaluated = reevaluatePlateDiagnostics(
+      baseResults,
+      newCutoff,
+      baseSummary.meanNeg,
+      baseSummary.sdNeg
+    );
+
+    setAnalysisOutput({
+      ...analysisOutput,
+      results: reevaluated.results,
+      summary: reevaluated.summary,
+    });
+  };
+
+  // Reset to Auto Cutoff
+  const handleResetCutoff = () => {
+    if (!baseSummary || !analysisOutput) return;
+    setManualCutoff(null);
+
+    const reevaluated = reevaluatePlateDiagnostics(
+      baseResults,
+      autoCutoff,
+      baseSummary.meanNeg,
+      baseSummary.sdNeg
+    );
+
+    setAnalysisOutput({
+      ...analysisOutput,
+      results: reevaluated.results,
+      summary: reevaluated.summary,
+    });
   };
 
   const handleDownloadPdf = async () => {
@@ -135,34 +196,58 @@ export const App: React.FC = () => {
     }
   };
 
+  const activeCutoff = manualCutoff ?? analysisOutput?.summary.cutoffValue ?? autoCutoff;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Toast Notification */}
       {copiedToast && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-slate-950 px-4 py-2 rounded-full font-bold text-xs shadow-2xl flex items-center gap-1.5 animate-in fade-in">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-slate-950 px-4 py-2 rounded-full font-bold text-xs shadow-2xl flex items-center gap-1.5 animate-in fade-in">
           <Check className="w-4 h-4" />
           <span>Matrix copied to clipboard</span>
         </div>
       )}
 
-      {/* Clean, Minimal Header */}
-      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between shadow-sm">
+      {/* Clean, Minimal Header with Safe Notch Clearance */}
+      <header
+        style={{ paddingTop: 'var(--safe-top, 38px)' }}
+        className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 pb-3 flex items-center justify-between shadow-sm"
+      >
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center text-lg">
+          <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center text-lg shadow-inner">
             🦐
           </div>
-          <h1 className="text-base font-bold text-white tracking-tight">ELISA Reader</h1>
+          <div>
+            <h1 className="text-base font-bold text-white tracking-tight leading-tight">ELISA Reader</h1>
+            <span className="text-[10px] text-emerald-400 font-mono font-medium block">● Offline On-Device AI</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="text-right text-[11px] text-slate-400 font-mono">
+          <span className="text-slate-300 font-semibold block truncate max-w-[140px]">{currentPlateTitle}</span>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-lg w-full mx-auto p-3.5 space-y-3 flex flex-col">
+        {/* Prominent Main-Area Capture & Upload Action Buttons */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            onClick={() => setIsCameraOpen(true)}
+            className="py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold text-sm flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-600/25 transition-all"
+          >
+            <Camera className="w-5 h-5" />
+            <span>Camera</span>
+          </button>
+
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold active:scale-95 transition-all"
-            title="Upload Photo"
+            className="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-slate-100 font-semibold text-sm flex items-center justify-center gap-2.5 border border-slate-700/80 shadow-md transition-all"
           >
-            <Upload className="w-4 h-4 text-slate-400" />
+            <Upload className="w-5 h-5 text-sky-400" />
             <span>Upload</span>
           </button>
+
           <input
             ref={fileInputRef}
             type="file"
@@ -170,35 +255,6 @@ export const App: React.FC = () => {
             className="hidden"
             onChange={handleFileUpload}
           />
-
-          <button
-            onClick={() => setIsCameraOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all"
-          >
-            <Camera className="w-4 h-4" />
-            <span>Camera</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-lg w-full mx-auto p-3.5 space-y-3 flex flex-col">
-        {/* Sample Plate Dropdown */}
-        <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between gap-3">
-          <span className="text-xs font-medium text-slate-400 shrink-0">Sample:</span>
-          <select
-            className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none font-semibold truncate"
-            onChange={(e) => {
-              const s = SAMPLE_PLATES.find((p) => p.id === e.target.value);
-              if (s) loadSamplePlate(s);
-            }}
-          >
-            {SAMPLE_PLATES.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
         </div>
 
         {/* Progress Bar during processing */}
@@ -289,15 +345,12 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            {/* Tab 2: Detection Overlay View */}
+            {/* Tab 2: Interactive Zoomable Detection Overlay */}
             {selectedTab === 'overlay' && (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2 shadow-sm overflow-hidden">
-                <img
-                  src={analysisOutput.annotatedImageUrl}
-                  alt="Detection Overlay"
-                  className="w-full rounded-xl object-contain max-h-[380px]"
-                />
-              </div>
+              <ZoomableImageViewer
+                imageUrl={analysisOutput.annotatedImageUrl}
+                alt="Detection Wells Overlay"
+              />
             )}
 
             {/* Tab 3: Numerical Data Table */}
@@ -333,7 +386,7 @@ export const App: React.FC = () => {
                             const well = analysisOutput.results.find(
                               (w) => w.row === rowLetter && w.col === c + 1
                             );
-                            const isPos = well && well.predictedOd > analysisOutput.summary.cutoffValue;
+                            const isPos = well && well.predictedOd > activeCutoff;
                             return (
                               <td
                                 key={c}
@@ -353,8 +406,17 @@ export const App: React.FC = () => {
               </div>
             )}
 
+            {/* Small Minimal Function for Manual Cutoff Setting */}
+            <ManualCutoffControl
+              currentCutoff={activeCutoff}
+              autoCutoff={autoCutoff}
+              isManual={manualCutoff !== null}
+              onCutoffChange={handleCutoffChange}
+              onReset={handleResetCutoff}
+            />
+
             {/* Clean Export Actions */}
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 onClick={handleDownloadPdf}
                 disabled={isGeneratingPdf}
@@ -373,8 +435,8 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Minimal Outbreak Status Footer at Bottom */}
-            <div className="mt-auto pt-3">
+            {/* Minimal Outbreak Status Footer */}
+            <div className="pt-1">
               <div
                 className={`rounded-xl p-3 border flex items-center justify-between ${
                   analysisOutput.summary.outbreakAlert
@@ -411,6 +473,27 @@ export const App: React.FC = () => {
                 </span>
               </div>
             </div>
+
+            {/* Minimal Sample Input Option Moved to Bottom */}
+            <div className="mt-auto pt-2 pb-4 text-center">
+              <div className="inline-flex items-center gap-2 bg-slate-900/70 border border-slate-800 rounded-full px-3.5 py-1.5 text-xs text-slate-400 shadow-sm">
+                <span className="text-[11px] font-medium text-slate-400">Sample:</span>
+                <select
+                  value={currentSampleId}
+                  onChange={(e) => {
+                    const s = SAMPLE_PLATES.find((p) => p.id === e.target.value);
+                    if (s) loadSamplePlate(s);
+                  }}
+                  className="bg-transparent text-xs font-semibold text-sky-400 focus:outline-none cursor-pointer"
+                >
+                  {SAMPLE_PLATES.map((s) => (
+                    <option key={s.id} value={s.id} className="bg-slate-950 text-white">
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </>
         )}
       </main>
@@ -425,10 +508,11 @@ export const App: React.FC = () => {
       {/* Well Detail Inspector Modal */}
       <WellDetailModal
         well={selectedWell}
-        cutoff={analysisOutput?.summary.cutoffValue ?? 0.15}
+        cutoff={activeCutoff}
         onClose={() => setSelectedWell(null)}
       />
     </div>
   );
 };
 export default App;
+

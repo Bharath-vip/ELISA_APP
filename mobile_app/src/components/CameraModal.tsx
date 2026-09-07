@@ -1,6 +1,5 @@
-﻿import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, X, RefreshCw, Flashlight } from 'lucide-react';
-import { detectWellsYolo, type RawBox } from '../core/yoloDetector';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { Camera, X, RefreshCw, Flashlight, Smartphone } from 'lucide-react';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -10,20 +9,17 @@ interface CameraModalProps {
 
 export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCapture }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fallbackInputRef = useRef<HTMLInputElement>(null);
+
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
+  const [currentDeviceIndex, setCurrentDeviceIndex] = useState<number>(0);
 
   // Hardware torch state
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const [hasTorch, setHasTorch] = useState<boolean>(false);
-
-  // Live detection state
-  const [detectedCount, setDetectedCount] = useState<number>(0);
-  const [isPlateLocked, setIsPlateLocked] = useState<boolean>(false);
-
-  const isDetectingRef = useRef<boolean>(false);
 
   const stopCamera = useCallback(() => {
     if (stream) {
@@ -40,52 +36,58 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
         stream.getTracks().forEach((t) => t.stop());
       }
 
-      // Step 1: Enumerate cameras to target rear/back camera specifically
-      let selectedDeviceId: string | undefined;
+      // Enumerate devices to know how many cameras are available
+      let videoDevices: MediaDeviceInfo[] = [];
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoInputs = devices.filter((d) => d.kind === 'videoinput');
-
-        if (facingMode === 'environment') {
-          // Find back / rear camera by label
-          const backDevice = videoInputs.find((d) =>
-            /back|rear|environment/i.test(d.label)
-          );
-          if (backDevice) {
-            selectedDeviceId = backDevice.deviceId;
-          } else if (videoInputs.length > 1) {
-            // On many Android phones without permission labels, the last device is often the rear main camera
-            selectedDeviceId = videoInputs[videoInputs.length - 1].deviceId;
-          }
-        } else {
-          const frontDevice = videoInputs.find((d) =>
-            /front|user|selfie/i.test(d.label)
-          );
-          if (frontDevice) {
-            selectedDeviceId = frontDevice.deviceId;
-          }
-        }
+        videoDevices = devices.filter((d) => d.kind === 'videoinput');
+        setAvailableDevices(videoDevices);
       } catch (enumErr) {
         console.warn('Device enumeration error:', enumErr);
       }
 
-      // Step 2: Try to acquire video with fallback chain
-      let newStream: MediaStream | null = null;
-      const constraintsList: MediaStreamConstraints[] = [
-        ...(selectedDeviceId
-          ? [{ video: { deviceId: { exact: selectedDeviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }]
-          : []),
-        { video: { facingMode: { exact: facingMode }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
-        { video: { facingMode: facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
-        { video: true, audio: false },
-      ];
+      // Build prioritized constraint list
+      // 1. If user specifically selected a device index from available devices with label
+      const activeDev = videoDevices[currentDeviceIndex];
+      const constraintsList: MediaStreamConstraints[] = [];
 
+      if (activeDev && activeDev.deviceId) {
+        constraintsList.push({
+          video: {
+            deviceId: { exact: activeDev.deviceId },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+      }
+
+      // 2. Standard facingMode ideal constraints (browser/OS picks best primary camera)
+      constraintsList.push({
+        video: {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      });
+
+      // 3. Simple facingMode
+      constraintsList.push({
+        video: { facingMode: facingMode },
+        audio: false,
+      });
+
+      // 4. Any video stream fallback
+      constraintsList.push({ video: true, audio: false });
+
+      let newStream: MediaStream | null = null;
       for (const c of constraintsList) {
         try {
           newStream = await navigator.mediaDevices.getUserMedia(c);
           if (newStream) break;
         } catch (e) {
-          // try next constraint
+          console.warn('Constraint attempt failed:', e);
         }
       }
 
@@ -94,11 +96,17 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
       }
 
       setStream(newStream);
+
       if (videoRef.current) {
-        videoRef.current.srcObject = newStream;
+        const video = videoRef.current;
+        video.srcObject = newStream;
+        video.onloadedmetadata = () => {
+          video.play().catch((playErr) => console.warn('Video play error:', playErr));
+        };
+        video.play().catch((playErr) => console.warn('Immediate video play error:', playErr));
       }
 
-      // Check torch capability
+      // Check torch capability on the active track
       const track = newStream.getVideoTracks()[0];
       if (track) {
         const caps: any = track.getCapabilities?.();
@@ -106,9 +114,11 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
       }
     } catch (err: any) {
       console.error('Camera access error:', err);
-      setErrorMsg('Could not access camera. Please check camera permissions.');
+      setErrorMsg(
+        'Camera stream could not be started. You can tap "Use System Camera" below to take a photo using your phone\'s camera app.'
+      );
     }
-  }, [facingMode, stream]);
+  }, [facingMode, currentDeviceIndex, stream]);
 
   const toggleTorch = async () => {
     if (!stream) return;
@@ -126,7 +136,11 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
   };
 
   const switchCamera = () => {
-    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
+    if (availableDevices.length > 1) {
+      setCurrentDeviceIndex((prev) => (prev + 1) % availableDevices.length);
+    } else {
+      setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
+    }
   };
 
   useEffect(() => {
@@ -138,14 +152,14 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
     return () => {
       stopCamera();
     };
-  }, [isOpen, startCamera, stopCamera]);
+  }, [isOpen, facingMode, currentDeviceIndex]);
 
   const handleSnap = useCallback(() => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
-    let vw = video.videoWidth || 1920;
-    let vh = video.videoHeight || 1080;
+    const vw = video.videoWidth || 1920;
+    const vh = video.videoHeight || 1080;
 
     // Guarantee landscape orientation (Width >= Height)
     if (vh > vw) {
@@ -167,97 +181,94 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
     onClose();
   }, [onCapture, onClose, stopCamera]);
 
-  // Real-time detection loop
-  useEffect(() => {
-    if (!isOpen || !stream) return;
+  // Native System Camera Fallback Handler
+  const handleSystemCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    let isMounted = true;
-    const interval = setInterval(async () => {
-      if (!videoRef.current || !overlayCanvasRef.current || isDetectingRef.current) return;
-      const video = videoRef.current;
-      if (video.readyState < 2) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const vw = img.naturalWidth || img.width;
+        const vh = img.naturalHeight || img.height;
 
-      isDetectingRef.current = true;
-      try {
-        const sampleCanvas = document.createElement('canvas');
-        sampleCanvas.width = 640;
-        sampleCanvas.height = 640;
-        const sCtx = sampleCanvas.getContext('2d', { willReadFrequently: true })!;
-        sCtx.drawImage(video, 0, 0, 640, 640);
-
-        const boxes: RawBox[] = await detectWellsYolo(sampleCanvas, 0.20);
-        if (!isMounted) return;
-
-        const overlay = overlayCanvasRef.current;
-        if (!overlay) return;
-        overlay.width = overlay.clientWidth;
-        overlay.height = overlay.clientHeight;
-        const oCtx = overlay.getContext('2d')!;
-        oCtx.clearRect(0, 0, overlay.width, overlay.height);
-
-        const count = boxes.length;
-        setDetectedCount(count);
-        const locked = count >= 45;
-        setIsPlateLocked(locked);
-
-        const strokeColor = locked ? '#10B981' : '#38BDF8';
-        const scaleX = overlay.width / 640;
-        const scaleY = overlay.height / 640;
-
-        for (const b of boxes) {
-          const cx = b.cx * scaleX;
-          const cy = b.cy * scaleY;
-          const r = Math.max((b.w * scaleX) / 2, 3);
-
-          oCtx.beginPath();
-          oCtx.arc(cx, cy, r, 0, 2 * Math.PI);
-          oCtx.lineWidth = 2;
-          oCtx.strokeStyle = strokeColor;
-          oCtx.stroke();
+        // Guarantee landscape orientation
+        if (vh > vw) {
+          canvas.width = vh;
+          canvas.height = vw;
+          const ctx = canvas.getContext('2d')!;
+          ctx.translate(vh / 2, vw / 2);
+          ctx.rotate((90 * Math.PI) / 180);
+          ctx.drawImage(img, -vw / 2, -vh / 2, vw, vh);
+        } else {
+          canvas.width = vw;
+          canvas.height = vh;
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(img, 0, 0, vw, vh);
         }
-      } catch (err) {
-        // silent frame error
-      } finally {
-        isDetectingRef.current = false;
-      }
-    }, 250);
 
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
+        stopCamera();
+        onCapture(canvas);
+        onClose();
+      };
     };
-  }, [isOpen, stream]);
+    reader.readAsDataURL(file);
+  };
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between select-none overflow-hidden font-sans">
-      {/* Top Header Bar */}
-      <div className="flex justify-between items-center px-4 py-3 bg-slate-950/80 backdrop-blur-md z-30 border-b border-slate-800">
+      {/* Hidden Native System Camera Capture */}
+      <input
+        ref={fallbackInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleSystemCameraCapture}
+      />
+
+      {/* Top Header Bar with Safe Notch Spacing */}
+      <div
+        style={{ paddingTop: 'var(--safe-top, 38px)' }}
+        className="flex justify-between items-center px-4 pb-3 bg-slate-950/90 backdrop-blur-md z-30 border-b border-slate-800/80"
+      >
         <button
           onClick={onClose}
-          className="p-2 rounded-xl bg-slate-800 text-white hover:bg-slate-700 active:scale-95"
+          className="p-2.5 rounded-xl bg-slate-800/90 text-white hover:bg-slate-700 active:scale-95 shadow-md"
+          title="Close Camera"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* Camera info / toggle */}
         <div className="flex items-center gap-2">
+          {/* Flip / Cycle Camera */}
           <button
             onClick={switchCamera}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-white text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all"
-            title="Switch Camera"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 text-white text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all shadow-md"
+            title="Switch Camera Sensor"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>{facingMode === 'environment' ? 'Rear Camera' : 'Front Camera'}</span>
+            <span>
+              {availableDevices.length > 1
+                ? `Camera ${currentDeviceIndex + 1}/${availableDevices.length}`
+                : facingMode === 'environment'
+                ? 'Rear'
+                : 'Front'}
+            </span>
           </button>
 
+          {/* Torch Toggle */}
           {hasTorch && (
             <button
               onClick={toggleTorch}
-              className={`p-2 rounded-xl border transition-all ${
+              className={`p-2.5 rounded-xl border transition-all shadow-md ${
                 torchOn
-                  ? 'bg-amber-500 text-slate-950 border-amber-400'
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
                   : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
               }`}
               title="Flashlight"
@@ -265,14 +276,31 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
               <Flashlight className="w-4 h-4" />
             </button>
           )}
+
+          {/* Direct System Camera Trigger */}
+          <button
+            onClick={() => fallbackInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-semibold active:scale-95 transition-all shadow-md"
+            title="Open Phone's Native Camera"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">System Camera</span>
+          </button>
         </div>
       </div>
 
       {/* Main Viewfinder */}
       <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-slate-950">
         {errorMsg ? (
-          <div className="p-6 text-center text-red-400 max-w-sm">
-            <p className="text-sm font-semibold">{errorMsg}</p>
+          <div className="p-6 text-center text-slate-300 max-w-sm space-y-4">
+            <p className="text-sm font-medium text-red-400">{errorMsg}</p>
+            <button
+              onClick={() => fallbackInputRef.current?.click()}
+              className="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 mx-auto active:scale-95 transition-all shadow-lg shadow-sky-500/20"
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>Take Photo with Phone Camera</span>
+            </button>
           </div>
         ) : (
           <>
@@ -284,56 +312,74 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
               className="absolute inset-0 w-full h-full object-cover"
             />
 
-            <canvas
-              ref={overlayCanvasRef}
-              className="absolute inset-0 w-full h-full pointer-events-none z-10"
-            />
-
-            {/* Clean 12:8 Landscape Reticle */}
-            <div
-              className={`relative pointer-events-none w-[90%] max-w-2xl aspect-[1.5/1] rounded-2xl border-2 transition-all duration-300 flex flex-col justify-between p-3 ${
-                isPlateLocked
-                  ? 'border-emerald-400 bg-emerald-950/10'
-                  : 'border-white/50 bg-slate-950/10'
-              }`}
-            >
-              <div className="flex justify-between items-center text-[10px] font-mono text-white/80 font-bold px-2 py-0.5 bg-black/40 rounded w-max">
-                <span>ROW A (TOP) • 12 COLS</span>
+            {/* High-Contrast Landscape 1.5:1 (12:8) Reticle Overlay */}
+            <div className="relative pointer-events-none w-[90%] max-w-2xl aspect-[1.5/1] rounded-2xl border-2 border-dashed border-sky-400/80 bg-slate-950/20 shadow-2xl flex flex-col justify-between p-3.5 backdrop-blur-[1px]">
+              {/* Top Row Label & Guidance */}
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-mono text-sky-300 font-bold px-2 py-1 bg-slate-950/80 rounded-md border border-sky-500/30">
+                  ROW A (TOP) • 12 COLS
+                </span>
+                <span className="text-[9px] font-mono text-slate-300 px-2 py-0.5 bg-black/60 rounded">
+                  96-WELL FORMAT
+                </span>
               </div>
 
-              <div className="flex justify-between items-center text-[10px] font-mono text-white/80 px-2 py-0.5 bg-black/40 rounded w-max self-end">
-                <span>ROW H (BOTTOM)</span>
+              {/* Center Alignment Crosshair */}
+              <div className="self-center flex flex-col items-center gap-1 opacity-70">
+                <div className="w-6 h-0.5 bg-sky-400/60" />
+                <div className="h-6 w-0.5 bg-sky-400/60 -mt-3.5" />
+                <span className="text-[10px] font-sans font-medium text-white/90 bg-black/60 px-2 py-0.5 rounded mt-1">
+                  Hold flat over plate
+                </span>
               </div>
+
+              {/* Bottom Row Label */}
+              <div className="flex justify-between items-center">
+                <span className="text-[9px] font-mono text-slate-400 px-1.5 py-0.5 bg-black/60 rounded">
+                  COL 1–12
+                </span>
+                <span className="text-[10px] font-mono text-sky-300 font-bold px-2 py-1 bg-slate-950/80 rounded-md border border-sky-500/30 self-end">
+                  ROW H (BOTTOM)
+                </span>
+              </div>
+
+              {/* Corner brackets */}
+              <div className="absolute -top-1 -left-1 w-5 h-5 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg" />
+              <div className="absolute -top-1 -right-1 w-5 h-5 border-t-4 border-r-4 border-emerald-400 rounded-tr-lg" />
+              <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-4 border-l-4 border-emerald-400 rounded-bl-lg" />
+              <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-4 border-r-4 border-emerald-400 rounded-br-lg" />
             </div>
           </>
         )}
       </div>
 
       {/* Bottom Shutter Action Bar */}
-      <div className="h-24 bg-slate-950/90 backdrop-blur-md flex items-center justify-between px-8 z-30 border-t border-slate-800">
-        <div className="text-xs font-mono text-slate-400">
-          <span className="text-white font-bold text-base block">{detectedCount}</span>
-          <span>Wells</span>
-        </div>
+      <div
+        style={{ paddingBottom: 'var(--safe-bottom, 16px)' }}
+        className="h-28 bg-slate-950/95 backdrop-blur-md flex items-center justify-between px-6 z-30 border-t border-slate-800"
+      >
+        <button
+          onClick={() => fallbackInputRef.current?.click()}
+          className="flex flex-col items-center gap-1 text-[11px] text-slate-400 hover:text-white p-2"
+          title="Open Native System Camera"
+        >
+          <Smartphone className="w-5 h-5 text-sky-400" />
+          <span>System Cam</span>
+        </button>
 
-        {/* Shutter Button */}
+        {/* Big Round Shutter Button */}
         <button
           onClick={handleSnap}
           disabled={!!errorMsg}
-          className={`w-18 h-18 rounded-full border-4 flex items-center justify-center transition-all active:scale-90 shadow-xl ${
-            isPlateLocked
-              ? 'border-emerald-400 bg-emerald-500 scale-105 shadow-emerald-500/40'
-              : 'border-white bg-slate-800 hover:bg-slate-700'
-          }`}
+          className="w-20 h-20 rounded-full border-4 border-white bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-all active:scale-90 shadow-2xl shadow-emerald-500/20"
+          title="Capture Image"
         >
-          <Camera className="w-8 h-8 text-white" />
+          <Camera className="w-9 h-9 text-emerald-400" />
         </button>
 
-        <div className="text-xs text-right">
-          <span className={`font-bold block ${isPlateLocked ? 'text-emerald-400' : 'text-slate-400'}`}>
-            {isPlateLocked ? 'LOCKED' : 'READY'}
-          </span>
-          <span className="text-[10px] text-slate-500">Landscape</span>
+        <div className="text-right text-[11px] text-slate-400">
+          <span className="font-bold text-white block">Capture</span>
+          <span>Landscape</span>
         </div>
       </div>
     </div>

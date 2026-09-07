@@ -1,4 +1,4 @@
-﻿import type { WellResult, DiagnosticsSummary } from './types';
+import type { WellResult, DiagnosticsSummary } from './types';
 
 export function evaluatePlateDiagnostics(
   rawResults: { row: string; col: number; predictedOd: number; trueOd?: number | null; cx: number; cy: number; radius: number; cropDataUrl?: string; features?: Record<string, number> }[]
@@ -72,6 +72,47 @@ export function evaluatePlateDiagnostics(
     positiveCount,
     negativeCount,
     cutoffValue,
+    meanNeg,
+    sdNeg,
+    outbreakAlert: positiveCount > 0,
+  };
+
+  return { results, summary };
+}
+
+export function reevaluatePlateDiagnostics(
+  existingResults: WellResult[],
+  customCutoff: number,
+  meanNeg: number,
+  sdNeg: number
+): { results: WellResult[]; summary: DiagnosticsSummary } {
+  let positiveCount = 0;
+  let negativeCount = 0;
+
+  const results: WellResult[] = existingResults.map((w) => {
+    let status: 'POSITIVE' | 'NEGATIVE' | 'BORDERLINE';
+    if (w.predictedOd > customCutoff + 0.02) {
+      status = 'POSITIVE';
+      positiveCount++;
+    } else if (w.predictedOd >= customCutoff - 0.02) {
+      status = 'BORDERLINE';
+      positiveCount++;
+    } else {
+      status = 'NEGATIVE';
+      negativeCount++;
+    }
+
+    return {
+      ...w,
+      status,
+    };
+  });
+
+  const summary: DiagnosticsSummary = {
+    totalWells: results.length,
+    positiveCount,
+    negativeCount,
+    cutoffValue: customCutoff,
     meanNeg,
     sdNeg,
     outbreakAlert: positiveCount > 0,
