@@ -1,4 +1,4 @@
-﻿# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -30,3 +30,8 @@ scratch/
 runs/
 yolo_runs/
 assets/temp_*
+
+# Node & Frontend Build
+node_modules/
+dist/
+.vite/
