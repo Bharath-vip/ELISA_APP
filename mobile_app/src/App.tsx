@@ -8,6 +8,7 @@ import {
   Activity,
   WifiOff,
   Sparkles,
+  Clock,
 } from 'lucide-react';
 import { processPlateImage, type FullAnalysisOutput, type AnalysisProgress } from './core/pipeline';
 import type { WellResult } from './core/types';
@@ -15,7 +16,9 @@ import { CameraModal } from './components/CameraModal';
 import { MicroplateGrid } from './components/MicroplateGrid';
 import { WellDetailModal } from './components/WellDetailModal';
 import { OutbreakAlertCard } from './components/OutbreakAlertCard';
+import { HistoryModal } from './components/HistoryModal';
 import { generateClinicalPdfReport, downloadPdf } from './core/pdfGenerator';
+import { savePlateRecord } from './core/db';
 
 const SAMPLE_PLATES = [
   { id: 'plate_0002_a', name: 'Plate 0002 (Shot A) [HELD-OUT UNSEEN TEST]', path: '/sample_plates/plate_0002_a.jpg', cols: 11 },
@@ -25,6 +28,7 @@ const SAMPLE_PLATES = [
 
 export const App: React.FC = () => {
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
   const [analysisOutput, setAnalysisOutput] = useState<FullAnalysisOutput | null>(null);
   const [selectedWell, setSelectedWell] = useState<WellResult | null>(null);
@@ -50,6 +54,15 @@ export const App: React.FC = () => {
       try {
         const out = await processPlateImage(img, sample.cols, setProgress);
         setAnalysisOutput(out);
+        savePlateRecord({
+          id: Date.now().toString(),
+          title: sample.name,
+          timestamp: new Date().toISOString(),
+          summary: out.summary,
+          results: out.results,
+          numCols: out.numCols,
+          thumbnailUrl: out.annotatedImageUrl,
+        });
       } catch (err) {
         console.error('Inference error:', err);
       }
@@ -69,6 +82,15 @@ export const App: React.FC = () => {
         try {
           const out = await processPlateImage(img, 10, setProgress);
           setAnalysisOutput(out);
+          savePlateRecord({
+            id: Date.now().toString(),
+            title: file.name,
+            timestamp: new Date().toISOString(),
+            summary: out.summary,
+            results: out.results,
+            numCols: out.numCols,
+            thumbnailUrl: out.annotatedImageUrl,
+          });
         } catch (err) {
           console.error('Inference error:', err);
         }
@@ -82,6 +104,15 @@ export const App: React.FC = () => {
     try {
       const out = await processPlateImage(canvas, 10, setProgress);
       setAnalysisOutput(out);
+      savePlateRecord({
+        id: Date.now().toString(),
+        title: 'Live Field Photo',
+        timestamp: new Date().toISOString(),
+        summary: out.summary,
+        results: out.results,
+        numCols: out.numCols,
+        thumbnailUrl: out.annotatedImageUrl,
+      });
     } catch (err) {
       console.error('Inference error:', err);
     }
@@ -124,6 +155,14 @@ export const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setIsHistoryOpen(true)}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95 transition-all"
+            title="Offline Test History"
+          >
+            <Clock className="w-5 h-5" />
+          </button>
+
           <button
             onClick={() => fileInputRef.current?.click()}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95 transition-all"
@@ -346,6 +385,22 @@ export const App: React.FC = () => {
         well={selectedWell}
         cutoff={analysisOutput?.summary.cutoffValue ?? 0.15}
         onClose={() => setSelectedWell(null)}
+      />
+
+      {/* Offline History Modal */}
+      <HistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        onLoadRecord={(record) => {
+          setCurrentPlateTitle(record.title);
+          setAnalysisOutput({
+            results: record.results,
+            summary: record.summary,
+            annotatedImageUrl: record.thumbnailUrl || '',
+            numCols: record.numCols,
+            durationMs: 0,
+          });
+        }}
       />
     </div>
   );

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WSSA Mobile Reader</string>
+    <string name="title_activity_main">WSSA Mobile Reader</string>
+    <string name="package_name">org.wssa.elisa</string>
+    <string name="custom_url_scheme">org.wssa.elisa</string>
+</resources>
