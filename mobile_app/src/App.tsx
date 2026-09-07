@@ -88,7 +88,7 @@ export const App: React.FC = () => {
       img.src = event.target?.result as string;
       img.onload = async () => {
         try {
-          const out = await processPlateImage(img, 10, cutoff, setProgress);
+          const out = await processPlateImage(img, undefined, cutoff, setProgress);
           setAnalysisOutput(out);
           setBaseResults(out.results);
         } catch (err) {
@@ -102,7 +102,7 @@ export const App: React.FC = () => {
   const handleCameraCapture = async (canvas: HTMLCanvasElement) => {
     setCurrentPlateTitle('Camera Capture');
     try {
-      const out = await processPlateImage(canvas, 10, cutoff, setProgress);
+      const out = await processPlateImage(canvas, undefined, cutoff, setProgress);
       setAnalysisOutput(out);
       setBaseResults(out.results);
     } catch (err) {

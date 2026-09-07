@@ -64,7 +64,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
       const constraintsList: MediaStreamConstraints[] = [
         {
           video: {
-            facingMode: { exact: 'environment' },
+            facingMode: { ideal: 'environment' },
             width: { ideal: 1920, min: 1280 },
             height: { ideal: 1080, min: 720 },
             // @ts-ignore
@@ -75,8 +75,14 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
         {
           video: {
             facingMode: 'environment',
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        },
+        {
+          video: {
+            facingMode: 'environment',
           },
           audio: false,
         },
@@ -115,19 +121,33 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
       }
 
       setStream(newStream);
-
-      if (videoRef.current) {
-        const video = videoRef.current;
-        video.srcObject = newStream;
-        video.onloadedmetadata = () => {
-          video.play().catch(console.warn);
-        };
-        video.play().catch(console.warn);
-      }
     } catch (err: any) {
       console.error('Rear camera access error:', err);
       setErrorMsg('Could not access rear camera. Please check camera permissions.');
     }
+  }, [stream]);
+
+  // Permanently bind stream to video element as soon as stream exists
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !stream) return;
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+
+    const playVideo = () => {
+      video.play().catch((err) => console.warn('Camera video play error:', err));
+    };
+
+    video.addEventListener('loadedmetadata', playVideo);
+    video.addEventListener('canplay', playVideo);
+    playVideo();
+
+    return () => {
+      video.removeEventListener('loadedmetadata', playVideo);
+      video.removeEventListener('canplay', playVideo);
+    };
   }, [stream]);
 
   useEffect(() => {
@@ -199,8 +219,19 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
 
   return (
     <div className="fixed inset-0 z-50 bg-black select-none overflow-hidden font-sans flex flex-row">
-      {/* 1. When in Portrait Mode: Camera is Inactive with Rotate to Landscape Screen */}
-      {!isLandscape ? (
+      {/* 0. Live Video Element: ALWAYS mounted in DOM to prevent WebView video decoder drops */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        // @ts-ignore
+        webkit-playsinline="true"
+        className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-none"
+      />
+
+      {/* 1. When in Portrait Mode: Camera is Inactive with Rotate to Landscape Screen Overlay */}
+      {!isLandscape && (
         <div className="absolute inset-0 z-50 bg-slate-950 flex flex-col justify-between p-6 select-none animate-fadeIn">
           {/* Top Bar with Safe Notch Clearance */}
           <div
@@ -251,12 +282,14 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
             Hold phone with home screen / shutter on the right
           </div>
         </div>
-      ) : (
-        /* 2. When in Landscape Mode: Camera is Live, Focused, and Ready to Capture */
+      )}
+
+      {/* 2. When in Landscape Mode: Camera Viewfinder Reticle and Right-Hand Shutter Bar */}
+      {isLandscape && (
         <>
-          {/* Viewfinder Main Area */}
+          {/* Viewfinder Overlay Area */}
           <div
-            className="relative flex-1 h-full w-full flex items-center justify-center overflow-hidden bg-black cursor-crosshair"
+            className="relative flex-1 h-full w-full flex items-center justify-center overflow-hidden cursor-crosshair z-10"
             onClick={handleTapToFocus}
           >
             {/* Top Controls: Close button & Autofocus status */}
@@ -285,19 +318,11 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
             </div>
 
             {errorMsg ? (
-              <div className="p-6 text-center text-red-400 max-w-sm z-30">
+              <div className="p-6 text-center text-red-400 max-w-sm z-30 bg-slate-900/90 rounded-2xl border border-red-500/30 shadow-2xl">
                 <p className="text-sm font-semibold">{errorMsg}</p>
               </div>
             ) : (
               <>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
-
                 {/* Tap Focus Ring */}
                 {focusPulse && (
                   <div

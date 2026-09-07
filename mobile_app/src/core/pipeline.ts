@@ -76,7 +76,7 @@ export function renderAnnotatedPlateOverlay(
 
 export async function processPlateImage(
   imageSource: HTMLImageElement | HTMLCanvasElement,
-  numCols = 10,
+  targetNumCols?: number,
   cutoff = 0.300,
   onProgress?: (p: AnalysisProgress) => void,
   metadata?: FarmMetadata
@@ -125,9 +125,9 @@ export async function processPlateImage(
     // 2. YOLO Detection
     const rawBoxes = await detectWellsYolo(canvas, 0.25);
 
-    // 3. Regularize grid with RANSAC Projective Homography
+    // 3. Regularize grid with RANSAC Projective Homography & dynamic column fitting
     update('homography', 'Fitting 8-DOF Projective Homography lattice...', 35);
-    const wellCoords = regularizeWellGrid(rawBoxes, numCols, width, height);
+    const { wellCoords, numCols } = regularizeWellGrid(rawBoxes, targetNumCols, width, height);
 
     // 4. Sample inter-well plastic reference
     update('sampling', 'Sampling in-scene virgin polystyrene nodes...', 50);

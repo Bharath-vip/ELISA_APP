@@ -123,26 +123,38 @@ export function fitRansacHomography(
   return bestInlierCount >= 12 ? bestH : null;
 }
 
-// Full Regularization: Match detections to ANSI lattice and project all 96 wells
+export interface GridRegularizationResult {
+  wellCoords: Record<string, WellCoord>;
+  numCols: number;
+}
+
+// Full Regularization: Match detections to ANSI lattice and dynamically determine column count (up to 12)
 export function regularizeWellGrid(
   rawDetections: { cx: number; cy: number; w: number; h: number }[],
-  numCols: number,
+  targetNumCols: number | undefined,
   imgWidth: number,
   imgHeight: number
-): Record<string, WellCoord> {
+): GridRegularizationResult {
   const wellCoords: Record<string, WellCoord> = {};
 
-  if (rawDetections.length < 15) {
+  // 1. Initial aspect ratio filter (0.70 .. 1.40)
+  const okDetections = rawDetections.filter((d) => {
+    const ar = d.w / Math.max(d.h, 1e-3);
+    return ar >= 0.70 && ar <= 1.40;
+  });
+
+  if (okDetections.length < 15 && rawDetections.length < 15) {
     // Fallback: Uniform ANSI grid
+    const actualCols = targetNumCols && targetNumCols >= 6 && targetNumCols <= 12 ? targetNumCols : 12;
     const marginX = imgWidth * 0.08;
     const marginY = imgHeight * 0.08;
-    const stepX = (imgWidth - 2 * marginX) / (numCols - 1);
+    const stepX = (imgWidth - 2 * marginX) / (actualCols - 1);
     const stepY = (imgHeight - 2 * marginY) / 7;
     const radius = Math.round(stepX * 0.40);
 
     for (let r = 0; r < 8; r++) {
       const rowLetter = ROWS[r];
-      for (let c = 0; c < numCols; c++) {
+      for (let c = 0; c < actualCols; c++) {
         wellCoords[`${rowLetter}_${c + 1}`] = {
           row: rowLetter,
           col: c + 1,
@@ -152,30 +164,42 @@ export function regularizeWellGrid(
         };
       }
     }
-    return wellCoords;
+    return { wellCoords, numCols: actualCols };
   }
 
-  // Filter aspect ratios (0.70 .. 1.40)
-  const okDetections = rawDetections.filter((d) => {
-    const ar = d.w / Math.max(d.h, 1e-3);
-    return ar >= 0.70 && ar <= 1.40;
-  });
-
   const validDets = okDetections.length >= 15 ? okDetections : rawDetections;
-  const avgW = validDets.reduce((a, b) => a + b.w, 0) / validDets.length;
-  const avgH = validDets.reduce((a, b) => a + b.h, 0) / validDets.length;
-  const D = (avgW + avgH) / 2.0;
+  const widths = validDets.map((d) => d.w).sort((a, b) => a - b);
+  const heights = validDets.map((d) => d.h).sort((a, b) => a - b);
+  const medW = widths[Math.floor(widths.length / 2)];
+  const medH = heights[Math.floor(heights.length / 2)];
+  const D = (medW + medH) / 2.0;
   const innerRadius = Math.round(0.40 * D);
 
-  const cxs = validDets.map((d) => d.cx);
-  const cys = validDets.map((d) => d.cy);
+  // Size filtering: remove outlier detections
+  const sizeFiltered = validDets.filter(
+    (d) =>
+      d.w >= 0.55 * medW &&
+      d.w <= 1.65 * medW &&
+      d.h >= 0.55 * medH &&
+      d.h <= 1.65 * medH
+  );
+  const baseDets = sizeFiltered.length >= 15 ? sizeFiltered : validDets;
 
-  // Cluster 8 row centers via K-means
+  // Vertical strip density filter: wells in an 8-well strip share similar X coordinates
+  const colDensity = baseDets.map(
+    (di) => baseDets.filter((dj) => Math.abs(di.cx - dj.cx) < 0.40 * D).length
+  );
+  const stripDets = baseDets.filter((_, idx) => colDensity[idx] >= 3);
+  const cleanDets = stripDets.length >= 15 ? stripDets : baseDets;
+
+  const cxs = cleanDets.map((d) => d.cx);
+  const cys = cleanDets.map((d) => d.cy);
+
+  // Cluster 8 row centers via K-means on Y coordinates
   const minY = Math.min(...cys);
   const maxY = Math.max(...cys);
   let rowCenters = Array.from({ length: 8 }, (_, i) => minY + (i / 7) * (maxY - minY));
 
-  // 10 K-means iterations
   for (let iter = 0; iter < 10; iter++) {
     const clusters: number[][] = Array.from({ length: 8 }, () => []);
     for (const y of cys) {
@@ -198,19 +222,46 @@ export function regularizeWellGrid(
   }
   rowCenters.sort((a, b) => a - b);
 
-  const diffs: number[] = [];
-  for (let i = 0; i < 7; i++) diffs.push(rowCenters[i + 1] - rowCenters[i]);
-  const rowPitch = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-  const colPitch = rowPitch;
+  const rowPitch = (rowCenters[7] - rowCenters[0]) / 7.0;
 
+  // Auto-detect number of columns from the horizontal span of clean well detections
   const minX = Math.min(...cxs);
-  const colCenters = Array.from({ length: numCols }, (_, c) => minX + c * colPitch);
+  const maxX = Math.max(...cxs);
+  const xSpan = maxX - minX;
+
+  const estimatedCols = Math.min(
+    12,
+    Math.max(6, Math.round(xSpan / Math.max(rowPitch, 1)) + 1)
+  );
+
+  // Count detections in each column bin to detect and trim empty slots
+  const colPitch = xSpan / Math.max(1, estimatedCols - 1);
+  const colBins = new Array(estimatedCols).fill(0);
+  for (const x of cxs) {
+    const cIdx = Math.round((x - minX) / Math.max(colPitch, 1));
+    if (cIdx >= 0 && cIdx < estimatedCols) {
+      colBins[cIdx]++;
+    }
+  }
+
+  let actualCols = estimatedCols;
+  // Trim trailing empty slots if fewer than 2 detections exist at the far edge
+  while (actualCols > 6 && colBins[actualCols - 1] < 2) {
+    actualCols--;
+  }
+
+  // If caller provided an explicit valid target column count, respect it
+  if (targetNumCols && targetNumCols >= 6 && targetNumCols <= 12) {
+    actualCols = targetNumCols;
+  }
+
+  const colCenters = Array.from({ length: actualCols }, (_, c) => minX + c * colPitch);
 
   // Match detections to nearest (r, c)
   const gridPts: { r: number; c: number }[] = [];
   const pixelPts: { x: number; y: number }[] = [];
 
-  for (const det of validDets) {
+  for (const det of cleanDets) {
     let bestR = 0;
     let minRDist = Infinity;
     for (let r = 0; r < 8; r++) {
@@ -223,7 +274,7 @@ export function regularizeWellGrid(
 
     let bestC = 0;
     let minCDist = Infinity;
-    for (let c = 0; c < numCols; c++) {
+    for (let c = 0; c < actualCols; c++) {
       const d = Math.abs(det.cx - colCenters[c]);
       if (d < minCDist) {
         minCDist = d;
@@ -243,7 +294,7 @@ export function regularizeWellGrid(
   if (H) {
     for (let r = 0; r < 8; r++) {
       const rowLetter = ROWS[r];
-      for (let c = 0; c < numCols; c++) {
+      for (let c = 0; c < actualCols; c++) {
         const [cx, cy] = projectPoint(H, c, r);
         wellCoords[`${rowLetter}_${c + 1}`] = {
           row: rowLetter,
@@ -254,13 +305,13 @@ export function regularizeWellGrid(
         };
       }
     }
-    return wellCoords;
+    return { wellCoords, numCols: actualCols };
   }
 
   // Robust Affine fallback
   for (let r = 0; r < 8; r++) {
     const rowLetter = ROWS[r];
-    for (let c = 0; c < numCols; c++) {
+    for (let c = 0; c < actualCols; c++) {
       wellCoords[`${rowLetter}_${c + 1}`] = {
         row: rowLetter,
         col: c + 1,
@@ -271,5 +322,5 @@ export function regularizeWellGrid(
     }
   }
 
-  return wellCoords;
+  return { wellCoords, numCols: actualCols };
 }
