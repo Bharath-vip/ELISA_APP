@@ -1,4 +1,4 @@
-﻿import type { WellResult, DiagnosticsSummary } from './types';
+import type { WellResult, DiagnosticsSummary, FarmMetadata, OpticalQualityMetrics } from './types';
 
 export interface SavedPlateRecord {
   id: string;
@@ -8,6 +8,8 @@ export interface SavedPlateRecord {
   results: WellResult[];
   thumbnailUrl?: string;
   numCols: number;
+  metadata?: FarmMetadata;
+  quality?: OpticalQualityMetrics;
 }
 
 const DB_NAME = 'wssa_elisa_db';

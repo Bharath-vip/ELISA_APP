@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import {
   Camera,
   Upload,
@@ -9,15 +9,23 @@ import {
   WifiOff,
   Sparkles,
   Clock,
+  Building2,
+  FileDown,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { processPlateImage, type FullAnalysisOutput, type AnalysisProgress } from './core/pipeline';
-import type { WellResult } from './core/types';
+import type { WellResult, FarmMetadata } from './core/types';
 import { CameraModal } from './components/CameraModal';
 import { MicroplateGrid } from './components/MicroplateGrid';
 import { WellDetailModal } from './components/WellDetailModal';
 import { OutbreakAlertCard } from './components/OutbreakAlertCard';
 import { HistoryModal } from './components/HistoryModal';
+import { CutoffTuningControl } from './components/CutoffTuningControl';
+import { MetadataModal } from './components/MetadataModal';
+import { OpticalQualityCard } from './components/OpticalQualityCard';
 import { generateClinicalPdfReport, downloadPdf } from './core/pdfGenerator';
+import { generatePlateCsv, downloadCsv, copyMatrixToClipboard } from './core/exportUtils';
 import { savePlateRecord } from './core/db';
 
 const SAMPLE_PLATES = [
@@ -29,12 +37,25 @@ const SAMPLE_PLATES = [
 export const App: React.FC = () => {
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isMetadataOpen, setIsMetadataOpen] = useState(false);
+  const [copiedToast, setCopiedToast] = useState(false);
+
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
   const [analysisOutput, setAnalysisOutput] = useState<FullAnalysisOutput | null>(null);
   const [selectedWell, setSelectedWell] = useState<WellResult | null>(null);
   const [selectedTab, setSelectedTab] = useState<'grid' | 'overlay' | 'matrix'>('grid');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [currentPlateTitle, setCurrentPlateTitle] = useState('Plate 0002 (Unseen Test)');
+
+  const [farmMetadata, setFarmMetadata] = useState<FarmMetadata>({
+    farmName: 'Pacific Marine Hatchery',
+    pondId: 'Pond 03 - Nursery',
+    species: 'Penaeus vannamei (Pacific White)',
+    technicianName: 'Field Biologist / QA',
+    tempCelsius: '28.5',
+    salinityPpt: '32.0',
+    notes: 'Routine pre-transfer health surveillance sample.',
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -52,7 +73,7 @@ export const App: React.FC = () => {
     img.src = sample.path;
     img.onload = async () => {
       try {
-        const out = await processPlateImage(img, sample.cols, setProgress);
+        const out = await processPlateImage(img, sample.cols, setProgress, farmMetadata);
         setAnalysisOutput(out);
         savePlateRecord({
           id: Date.now().toString(),
@@ -62,6 +83,8 @@ export const App: React.FC = () => {
           results: out.results,
           numCols: out.numCols,
           thumbnailUrl: out.annotatedImageUrl,
+          metadata: farmMetadata,
+          quality: out.quality,
         });
       } catch (err) {
         console.error('Inference error:', err);
@@ -80,7 +103,7 @@ export const App: React.FC = () => {
       img.src = event.target?.result as string;
       img.onload = async () => {
         try {
-          const out = await processPlateImage(img, 10, setProgress);
+          const out = await processPlateImage(img, 10, setProgress, farmMetadata);
           setAnalysisOutput(out);
           savePlateRecord({
             id: Date.now().toString(),
@@ -90,6 +113,8 @@ export const App: React.FC = () => {
             results: out.results,
             numCols: out.numCols,
             thumbnailUrl: out.annotatedImageUrl,
+            metadata: farmMetadata,
+            quality: out.quality,
           });
         } catch (err) {
           console.error('Inference error:', err);
@@ -100,22 +125,50 @@ export const App: React.FC = () => {
   };
 
   const handleCameraCapture = async (canvas: HTMLCanvasElement) => {
-    setCurrentPlateTitle('Live Field Photo');
+    setCurrentPlateTitle('Live Landscape Field Photo');
     try {
-      const out = await processPlateImage(canvas, 10, setProgress);
+      const out = await processPlateImage(canvas, 10, setProgress, farmMetadata);
       setAnalysisOutput(out);
       savePlateRecord({
         id: Date.now().toString(),
-        title: 'Live Field Photo',
+        title: 'Live Landscape Field Photo',
         timestamp: new Date().toISOString(),
         summary: out.summary,
         results: out.results,
         numCols: out.numCols,
         thumbnailUrl: out.annotatedImageUrl,
+        metadata: farmMetadata,
+        quality: out.quality,
       });
     } catch (err) {
       console.error('Inference error:', err);
     }
+  };
+
+  const handleCutoffChange = (newCutoff: number) => {
+    if (!analysisOutput) return;
+    const updatedResults = analysisOutput.results.map((w) => ({
+      ...w,
+      status: (w.predictedOd > newCutoff
+        ? 'POSITIVE'
+        : w.predictedOd > newCutoff * 0.85
+        ? 'BORDERLINE'
+        : 'NEGATIVE') as 'POSITIVE' | 'NEGATIVE' | 'BORDERLINE',
+    }));
+    const posCount = updatedResults.filter((w) => w.status === 'POSITIVE').length;
+    const negCount = updatedResults.filter((w) => w.status === 'NEGATIVE').length;
+    const updatedSummary = {
+      ...analysisOutput.summary,
+      cutoffValue: newCutoff,
+      positiveCount: posCount,
+      negativeCount: negCount,
+      outbreakAlert: posCount > 0,
+    };
+    setAnalysisOutput({
+      ...analysisOutput,
+      results: updatedResults,
+      summary: updatedSummary,
+    });
   };
 
   const handleDownloadPdf = async () => {
@@ -125,8 +178,9 @@ export const App: React.FC = () => {
       const pdfBytes = await generateClinicalPdfReport(
         analysisOutput.results,
         analysisOutput.summary,
-        'AquaFarm Sector 3 - Pond B',
-        currentPlateTitle
+        farmMetadata.farmName,
+        currentPlateTitle,
+        farmMetadata
       );
       downloadPdf(pdfBytes, `WSSA_Diagnostic_Report_${Date.now()}.pdf`);
     } catch (err) {
@@ -136,10 +190,39 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleExportCsv = () => {
+    if (!analysisOutput) return;
+    const csvStr = generatePlateCsv(
+      analysisOutput.results,
+      analysisOutput.summary,
+      analysisOutput.numCols,
+      currentPlateTitle,
+      farmMetadata
+    );
+    downloadCsv(csvStr, `WSSA_Diagnostic_Matrix_${Date.now()}.csv`);
+  };
+
+  const handleCopyMatrix = async () => {
+    if (!analysisOutput) return;
+    const success = await copyMatrixToClipboard(analysisOutput.results, analysisOutput.numCols);
+    if (success) {
+      setCopiedToast(true);
+      setTimeout(() => setCopiedToast(false), 2000);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans pb-12">
+      {/* Copied Toast */}
+      {copiedToast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-slate-950 px-4 py-2 rounded-full font-bold text-xs shadow-2xl flex items-center gap-1.5 animate-in fade-in slide-in-from-top-4 duration-200">
+          <Check className="w-4 h-4" />
+          <span>Matrix Copied to Clipboard!</span>
+        </div>
+      )}
+
       {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between shadow-md">
+      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-2.5 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-600 to-emerald-500 flex items-center justify-center shadow-lg shadow-sky-500/20 text-xl">
             🦐
@@ -149,16 +232,24 @@ export const App: React.FC = () => {
               WSSA Mobile Reader
             </h1>
             <span className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1">
-              <WifiOff className="w-3 h-3" /> 100% On-Device AI • Offline Ready
+              <WifiOff className="w-3 h-3" /> 100% Offline • Landscape AI
             </span>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
           <button
+            onClick={() => setIsMetadataOpen(true)}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95 transition-all"
+            title="Specimen & Farm Metadata"
+          >
+            <Building2 className="w-5 h-5" />
+          </button>
+
+          <button
             onClick={() => setIsHistoryOpen(true)}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95 transition-all"
-            title="Offline Test History"
+            title="Offline Test History & Trends"
           >
             <Clock className="w-5 h-5" />
           </button>
@@ -189,7 +280,24 @@ export const App: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-lg w-full mx-auto p-3.5 space-y-4">
+      <main className="flex-1 max-w-lg w-full mx-auto p-3.5 space-y-3.5">
+        {/* Farm & Specimen Banner */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 truncate">
+            <Building2 className="w-4 h-4 text-sky-400 shrink-0" />
+            <div className="truncate">
+              <span className="font-bold text-white block truncate">{farmMetadata.farmName}</span>
+              <span className="text-[10px] text-slate-400">{farmMetadata.pondId} • {farmMetadata.species}</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsMetadataOpen(true)}
+            className="text-[10px] text-sky-400 hover:underline font-bold shrink-0 ml-2"
+          >
+            Edit
+          </button>
+        </div>
+
         {/* Sample Plate Selector */}
         <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-3 shadow-md">
           <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5 flex items-center justify-between">
@@ -213,7 +321,7 @@ export const App: React.FC = () => {
           </select>
         </div>
 
-        {/* Progress Bar (Visible during inference) */}
+        {/* Progress Bar */}
         {progress && progress.stage !== 'done' && progress.stage !== 'idle' && (
           <div className="bg-slate-900 border border-sky-900/60 rounded-2xl p-4 shadow-xl animate-pulse">
             <div className="flex justify-between text-xs font-semibold mb-1.5">
@@ -240,6 +348,45 @@ export const App: React.FC = () => {
               onDownloadPdf={handleDownloadPdf}
               isGeneratingPdf={isGeneratingPdf}
             />
+
+            {/* Optical Illumination & Glare Quality Scorecard */}
+            {analysisOutput.quality && (
+              <OpticalQualityCard quality={analysisOutput.quality} />
+            )}
+
+            {/* Diagnostic Cut-off Tuning Slider */}
+            <CutoffTuningControl
+              summary={analysisOutput.summary}
+              onCutoffChange={handleCutoffChange}
+            />
+
+            {/* 1-Tap Data Export Action Bar */}
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={handleDownloadPdf}
+                disabled={isGeneratingPdf}
+                className="py-2.5 px-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow"
+              >
+                <FileDown className="w-3.5 h-3.5 text-red-400" />
+                <span>{isGeneratingPdf ? 'PDF...' : 'PDF Cert'}</span>
+              </button>
+
+              <button
+                onClick={handleExportCsv}
+                className="py-2.5 px-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Export CSV</span>
+              </button>
+
+              <button
+                onClick={handleCopyMatrix}
+                className="py-2.5 px-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow"
+              >
+                <Copy className="w-3.5 h-3.5 text-sky-400" />
+                <span>Copy Grid</span>
+              </button>
+            </div>
 
             {/* View Mode Toggle Tabs */}
             <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
@@ -331,42 +478,54 @@ export const App: React.FC = () => {
 
             {/* Tab 3: Numerical OD Matrix Spreadsheet */}
             {selectedTab === 'matrix' && (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-xl overflow-x-auto">
-                <table className="w-full text-center text-xs font-mono">
-                  <thead>
-                    <tr className="text-slate-400 border-b border-slate-800">
-                      <th className="p-1">Row</th>
-                      {Array.from({ length: analysisOutput.numCols }, (_, i) => (
-                        <th key={i} className="p-1 font-bold">
-                          {i + 1}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((rowLetter) => (
-                      <tr key={rowLetter} className="border-b border-slate-800/40 hover:bg-slate-800/20">
-                        <td className="p-1.5 font-bold text-slate-400">{rowLetter}</td>
-                        {Array.from({ length: analysisOutput.numCols }, (_, c) => {
-                          const well = analysisOutput.results.find(
-                            (w) => w.row === rowLetter && w.col === c + 1
-                          );
-                          const isPos = well && well.predictedOd > analysisOutput.summary.cutoffValue;
-                          return (
-                            <td
-                              key={c}
-                              className={`p-1.5 font-bold ${
-                                isPos ? 'text-red-400' : 'text-slate-200'
-                              }`}
-                            >
-                              {well ? well.predictedOd.toFixed(2) : '-'}
-                            </td>
-                          );
-                        })}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-xl space-y-2">
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-xs font-bold text-white">Optical Density (450nm) Matrix</span>
+                  <button
+                    onClick={handleCopyMatrix}
+                    className="text-[10px] text-sky-400 hover:text-sky-300 font-bold flex items-center gap-1 bg-slate-950 px-2 py-1 rounded border border-slate-800"
+                  >
+                    <Copy className="w-3 h-3" /> Copy Matrix
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-center text-xs font-mono">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="p-1">Row</th>
+                        {Array.from({ length: analysisOutput.numCols }, (_, i) => (
+                          <th key={i} className="p-1 font-bold">
+                            {i + 1}
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((rowLetter) => (
+                        <tr key={rowLetter} className="border-b border-slate-800/40 hover:bg-slate-800/20">
+                          <td className="p-1.5 font-bold text-slate-400">{rowLetter}</td>
+                          {Array.from({ length: analysisOutput.numCols }, (_, c) => {
+                            const well = analysisOutput.results.find(
+                              (w) => w.row === rowLetter && w.col === c + 1
+                            );
+                            const isPos = well && well.predictedOd > analysisOutput.summary.cutoffValue;
+                            return (
+                              <td
+                                key={c}
+                                className={`p-1.5 font-bold ${
+                                  isPos ? 'text-red-400' : 'text-slate-200'
+                                }`}
+                              >
+                                {well ? well.predictedOd.toFixed(2) : '-'}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </>
@@ -387,18 +546,29 @@ export const App: React.FC = () => {
         onClose={() => setSelectedWell(null)}
       />
 
+      {/* Farm & Specimen Metadata Modal */}
+      <MetadataModal
+        isOpen={isMetadataOpen}
+        initialMetadata={farmMetadata}
+        onClose={() => setIsMetadataOpen(false)}
+        onSave={(meta) => setFarmMetadata(meta)}
+      />
+
       {/* Offline History Modal */}
       <HistoryModal
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
         onLoadRecord={(record) => {
           setCurrentPlateTitle(record.title);
+          if (record.metadata) setFarmMetadata(record.metadata);
           setAnalysisOutput({
             results: record.results,
             summary: record.summary,
             annotatedImageUrl: record.thumbnailUrl || '',
             numCols: record.numCols,
             durationMs: 0,
+            quality: record.quality,
+            metadata: record.metadata,
           });
         }}
       />

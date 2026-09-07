@@ -1,4 +1,4 @@
-﻿export const ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
+export const ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
 export type RowLetter = typeof ROWS[number];
 
 export interface WellCoord {
@@ -77,6 +77,24 @@ export interface DecisionTree {
   value: number[];
 }
 
+export interface OpticalQualityMetrics {
+  uniformityScore: number; // e.g. 94%
+  glareTrimPercent: number; // e.g. 20%
+  tiltAngleDegrees: number; // e.g. 2.1°
+  wellsLockedCount: number; // e.g. 96
+  qualityGrade: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'HIGH_GLARE';
+}
+
+export interface FarmMetadata {
+  farmName: string;
+  pondId: string;
+  species: string;
+  technicianName: string;
+  tempCelsius?: string;
+  salinityPpt?: string;
+  notes?: string;
+}
+
 export interface ExtraTreesModelPayload {
   n_estimators: number;
   features: string[];
@@ -85,3 +103,4 @@ export interface ExtraTreesModelPayload {
   test_plates: string[];
   trees: DecisionTree[];
 }
+

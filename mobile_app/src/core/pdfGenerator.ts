@@ -1,11 +1,12 @@
-﻿import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import type { WellResult, DiagnosticsSummary } from './types';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import type { WellResult, DiagnosticsSummary, FarmMetadata } from './types';
 
 export async function generateClinicalPdfReport(
   results: WellResult[],
   summary: DiagnosticsSummary,
   farmName = 'AquaFarm Sector 3 - Pond B',
-  plateName = 'Plate 0002'
+  plateName = 'Plate 0002',
+  metadata?: FarmMetadata
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]); // A4
@@ -40,12 +41,19 @@ export async function generateClinicalPdfReport(
   });
 
   // Metadata Box
-  let curY = height - 120;
-  page.drawText(`Facility / Pond:  ${farmName}`, { x: 36, y: curY, size: 10, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`Plate ID:        ${plateName}`, { x: 320, y: curY, size: 10, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-  curY -= 18;
-  page.drawText(`Date & Time:      ${new Date().toLocaleString()}`, { x: 36, y: curY, size: 10, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`Diagnostic Mode: 100% Offline On-Device Mobile AI`, { x: 320, y: curY, size: 10, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+  let curY = height - 115;
+  const fName = metadata?.farmName || farmName;
+  const pId = metadata?.pondId || 'Pond 03';
+  page.drawText(`Facility:  ${fName} (${pId})`, { x: 36, y: curY, size: 9.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`Plate ID:        ${plateName}`, { x: 320, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+  curY -= 16;
+  const spec = metadata?.species || 'Penaeus vannamei';
+  const tech = metadata?.technicianName || 'Field Biologist';
+  page.drawText(`Species:   ${spec}`, { x: 36, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`Technician:      ${tech}`, { x: 320, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+  curY -= 16;
+  page.drawText(`Date & Time:      ${new Date().toLocaleString()}`, { x: 36, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`Diagnostic Mode: 100% Offline Mobile AI`, { x: 320, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
 
   // Outbreak Status Banner
   curY -= 35;
