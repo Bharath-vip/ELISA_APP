@@ -1,0 +1,7 @@
+Plate,Photo Shot,Label,Wells,MAE (OD),Cutoff MAE,RMSE,R2 Parity,R2 (%),Sensitivity,Specificity,Accuracy
+Plate 0002,plate A 0002.jpg,Plate 2 - Shot A,88,0.0485,0.0441,0.1239,0.9676,96.76%,100.0%,100.0%,100.0%
+Plate 0002,plate B 0002.jpg,Plate 2 - Shot B,88,0.0435,0.0216,0.1403,0.9585,95.85%,100.0%,100.0%,100.0%
+Plate 0002,Plate C 0002.jpg,Plate 2 - Shot C,88,0.0509,0.0179,0.1626,0.9442,94.42%,100.0%,100.0%,100.0%
+Plate 0006,Plate A 0006.jpg,Plate 6 - Shot A,80,0.0926,0.0462,0.1386,0.9675,96.75%,100.0%,89.4%,93.8%
+Plate 0006,Plate B 0006.jpg,Plate 6 - Shot B,80,0.0616,0.0138,0.1111,0.9791,97.91%,100.0%,97.9%,98.8%
+Plate 0006,Plate C 0006.jpg,Plate 6 - Shot C,80,0.0948,0.0369,0.1486,0.9627,96.27%,93.9%,100.0%,97.5%

@@ -1,0 +1,5 @@
+path: C:/Users/bhara/projects/ELISA/dataset
+train: images/train
+val: images/val
+nc: 1
+names: ['well']
