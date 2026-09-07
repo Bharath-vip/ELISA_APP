@@ -219,12 +219,16 @@ export const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-base font-bold text-white tracking-tight leading-tight">ELISA Reader</h1>
-            <span className="text-[10px] text-emerald-400 font-mono font-medium block">● Offline On-Device AI</span>
+            <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Ready
+            </span>
           </div>
         </div>
 
         <div className="text-right text-[11px] text-slate-400 font-mono">
-          <span className="text-slate-300 font-semibold block truncate max-w-[140px]">{currentPlateTitle}</span>
+          <span className="text-slate-300 font-semibold block truncate max-w-[140px] bg-slate-800/60 px-2 py-0.5 rounded-md border border-slate-700/60">
+            {currentPlateTitle}
+          </span>
         </div>
       </header>
 
@@ -234,18 +238,18 @@ export const App: React.FC = () => {
         <div className="grid grid-cols-2 gap-2.5">
           <button
             onClick={() => setIsCameraOpen(true)}
-            className="py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold text-sm flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-600/25 transition-all"
+            className="py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] text-white font-bold text-sm flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-600/25 border border-emerald-400/20 transition-all cursor-pointer"
           >
             <Camera className="w-5 h-5" />
-            <span>Camera</span>
+            <span>Capture Plate</span>
           </button>
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-slate-100 font-semibold text-sm flex items-center justify-center gap-2.5 border border-slate-700/80 shadow-md transition-all"
+            className="py-3 px-4 rounded-2xl bg-slate-800/90 hover:bg-slate-700 active:scale-[0.98] text-slate-100 font-semibold text-sm flex items-center justify-center gap-2.5 border border-slate-700/80 shadow-md transition-all cursor-pointer"
           >
             <Upload className="w-5 h-5 text-sky-400" />
-            <span>Upload</span>
+            <span>Upload File</span>
           </button>
 
           <input
