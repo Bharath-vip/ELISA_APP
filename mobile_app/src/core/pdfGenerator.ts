@@ -1,4 +1,4 @@
-﻿import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
@@ -74,9 +74,9 @@ export async function generateClinicalPdfReport(
 
   // Key Statistics
   curY -= 35;
-  page.drawText(`Negative Baseline: ${summary.meanNeg.toFixed(4)} OD`, { x: 36, y: curY, size: 9.5, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
-  page.drawText(`Standard Deviation: ${summary.sdNeg.toFixed(4)}`, { x: 210, y: curY, size: 9.5, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
-  page.drawText(`Cutoff Threshold: ${summary.cutoffValue.toFixed(4)} OD`, { x: 380, y: curY, size: 9.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`Cutoff Threshold: ${summary.cutoffValue.toFixed(4)} OD`, { x: 36, y: curY, size: 9.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`Total Wells: ${summary.totalWells}`, { x: 210, y: curY, size: 9.5, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
+  page.drawText(`Positive Wells: ${summary.positiveCount}`, { x: 380, y: curY, size: 9.5, font: fontBold, color: isPos ? rgb(0.8, 0.1, 0.1) : rgb(0.1, 0.5, 0.2) });
 
   // 8x12 Matrix Table
   curY -= 30;
@@ -152,7 +152,7 @@ export async function generateClinicalPdfReport(
     thickness: 0.5,
   });
 
-  page.drawText('Automated ELISA Plate Reader • Standard 3-SD Negative Cutoff Protocol', {
+  page.drawText('Automated ELISA Plate Reader • Optical Density (450 nm) Diagnostic Report', {
     x: 36,
     y: footerY,
     size: 8,

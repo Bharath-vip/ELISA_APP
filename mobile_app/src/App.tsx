@@ -14,8 +14,13 @@ import {
   CheckCircle2,
   FlaskConical,
 } from 'lucide-react';
-import { processPlateImage, type FullAnalysisOutput, type AnalysisProgress } from './core/pipeline';
-import type { WellResult, DiagnosticsSummary } from './core/types';
+import {
+  processPlateImage,
+  renderAnnotatedPlateOverlay,
+  type FullAnalysisOutput,
+  type AnalysisProgress,
+} from './core/pipeline';
+import type { WellResult } from './core/types';
 import { reevaluatePlateDiagnostics } from './core/diagnosticEngine';
 import { CameraModal } from './components/CameraModal';
 import { MicroplateGrid } from './components/MicroplateGrid';
@@ -43,11 +48,9 @@ export const App: React.FC = () => {
   const [currentPlateTitle, setCurrentPlateTitle] = useState('Plate 0002');
   const [currentSampleId, setCurrentSampleId] = useState('plate_0002_a');
 
-  // Manual Cutoff State
-  const [manualCutoff, setManualCutoff] = useState<number | null>(null);
-  const [autoCutoff, setAutoCutoff] = useState<number>(0.295);
+  // Manual Cutoff State (user-controlled, no baseline preset)
+  const [cutoff, setCutoff] = useState<number>(0.300);
   const [baseResults, setBaseResults] = useState<WellResult[]>([]);
-  const [baseSummary, setBaseSummary] = useState<DiagnosticsSummary | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,7 +61,6 @@ export const App: React.FC = () => {
   const loadSamplePlate = async (sample: typeof SAMPLE_PLATES[0]) => {
     setCurrentPlateTitle(sample.name);
     setCurrentSampleId(sample.id);
-    setManualCutoff(null);
     setProgress({ stage: 'detecting', message: 'Analyzing plate image...', progressPercent: 20 });
 
     const img = new Image();
@@ -66,11 +68,9 @@ export const App: React.FC = () => {
     img.src = sample.path;
     img.onload = async () => {
       try {
-        const out = await processPlateImage(img, sample.cols, setProgress);
+        const out = await processPlateImage(img, sample.cols, cutoff, setProgress);
         setAnalysisOutput(out);
         setBaseResults(out.results);
-        setBaseSummary(out.summary);
-        setAutoCutoff(out.summary.cutoffValue);
       } catch (err) {
         console.error('Inference error:', err);
       }
@@ -82,18 +82,15 @@ export const App: React.FC = () => {
     if (!file) return;
 
     setCurrentPlateTitle(file.name);
-    setManualCutoff(null);
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
       img.src = event.target?.result as string;
       img.onload = async () => {
         try {
-          const out = await processPlateImage(img, 10, setProgress);
+          const out = await processPlateImage(img, 10, cutoff, setProgress);
           setAnalysisOutput(out);
           setBaseResults(out.results);
-          setBaseSummary(out.summary);
-          setAutoCutoff(out.summary.cutoffValue);
         } catch (err) {
           console.error('Inference error:', err);
         }
@@ -104,53 +101,34 @@ export const App: React.FC = () => {
 
   const handleCameraCapture = async (canvas: HTMLCanvasElement) => {
     setCurrentPlateTitle('Camera Capture');
-    setManualCutoff(null);
     try {
-      const out = await processPlateImage(canvas, 10, setProgress);
+      const out = await processPlateImage(canvas, 10, cutoff, setProgress);
       setAnalysisOutput(out);
       setBaseResults(out.results);
-      setBaseSummary(out.summary);
-      setAutoCutoff(out.summary.cutoffValue);
     } catch (err) {
       console.error('Inference error:', err);
     }
   };
 
-  // Manual Cutoff Change Handler
+  // Manual Cutoff Change Handler: immediately re-evaluates and dynamically redraws the detection overlay
   const handleCutoffChange = (newCutoff: number) => {
-    if (!baseSummary || !analysisOutput) return;
-    setManualCutoff(newCutoff);
+    setCutoff(newCutoff);
+    if (!analysisOutput || baseResults.length === 0) return;
 
-    const reevaluated = reevaluatePlateDiagnostics(
-      baseResults,
-      newCutoff,
-      baseSummary.meanNeg,
-      baseSummary.sdNeg
+    const reevaluated = reevaluatePlateDiagnostics(baseResults, newCutoff);
+
+    // Immediately re-draw detection overlay circles with updated colors!
+    const newAnnotatedUrl = renderAnnotatedPlateOverlay(
+      analysisOutput.baseCanvas,
+      reevaluated.results,
+      newCutoff
     );
 
     setAnalysisOutput({
       ...analysisOutput,
       results: reevaluated.results,
       summary: reevaluated.summary,
-    });
-  };
-
-  // Reset to Auto Cutoff
-  const handleResetCutoff = () => {
-    if (!baseSummary || !analysisOutput) return;
-    setManualCutoff(null);
-
-    const reevaluated = reevaluatePlateDiagnostics(
-      baseResults,
-      autoCutoff,
-      baseSummary.meanNeg,
-      baseSummary.sdNeg
-    );
-
-    setAnalysisOutput({
-      ...analysisOutput,
-      results: reevaluated.results,
-      summary: reevaluated.summary,
+      annotatedImageUrl: newAnnotatedUrl,
     });
   };
 
@@ -196,8 +174,6 @@ export const App: React.FC = () => {
       setTimeout(() => setCopiedToast(false), 2000);
     }
   };
-
-  const activeCutoff = manualCutoff ?? analysisOutput?.summary.cutoffValue ?? autoCutoff;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -355,6 +331,7 @@ export const App: React.FC = () => {
               <ZoomableImageViewer
                 imageUrl={analysisOutput.annotatedImageUrl}
                 alt="Detection Wells Overlay"
+                resetKey={currentPlateTitle}
               />
             )}
 
@@ -391,7 +368,7 @@ export const App: React.FC = () => {
                             const well = analysisOutput.results.find(
                               (w) => w.row === rowLetter && w.col === c + 1
                             );
-                            const isPos = well && well.predictedOd > activeCutoff;
+                            const isPos = well && well.predictedOd > cutoff;
                             return (
                               <td
                                 key={c}
@@ -411,13 +388,10 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            {/* Small Minimal Function for Manual Cutoff Setting */}
+            {/* Manual Cutoff Control */}
             <ManualCutoffControl
-              currentCutoff={activeCutoff}
-              autoCutoff={autoCutoff}
-              isManual={manualCutoff !== null}
+              cutoff={cutoff}
               onCutoffChange={handleCutoffChange}
-              onReset={handleResetCutoff}
             />
 
             {/* Clean Export Actions */}
@@ -462,7 +436,7 @@ export const App: React.FC = () => {
                         : 'All Wells Negative'}
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      Cutoff: {analysisOutput.summary.cutoffValue.toFixed(3)} OD • Baseline: {analysisOutput.summary.meanNeg.toFixed(3)} OD
+                      Cutoff: {cutoff.toFixed(3)} OD
                     </span>
                   </div>
                 </div>
@@ -513,7 +487,7 @@ export const App: React.FC = () => {
       {/* Well Detail Inspector Modal */}
       <WellDetailModal
         well={selectedWell}
-        cutoff={activeCutoff}
+        cutoff={cutoff}
         onClose={() => setSelectedWell(null)}
       />
     </div>

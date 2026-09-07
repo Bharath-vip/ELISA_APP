@@ -20,15 +20,64 @@ export interface FullAnalysisOutput {
   results: WellResult[];
   summary: DiagnosticsSummary;
   annotatedImageUrl: string;
+  baseCanvas: HTMLCanvasElement;
   numCols: number;
   durationMs: number;
   quality?: OpticalQualityMetrics;
   metadata?: FarmMetadata;
 }
 
+export function renderAnnotatedPlateOverlay(
+  baseCanvas: HTMLCanvasElement,
+  results: WellResult[],
+  cutoff: number
+): string {
+  const visCanvas = document.createElement('canvas');
+  visCanvas.width = baseCanvas.width;
+  visCanvas.height = baseCanvas.height;
+  const visCtx = visCanvas.getContext('2d')!;
+  visCtx.drawImage(baseCanvas, 0, 0);
+
+  for (const w of results) {
+    const isPos = w.predictedOd > cutoff + 0.02;
+    const isBorder = !isPos && w.predictedOd >= cutoff - 0.02;
+    const strokeColor = isPos ? '#EF4444' : isBorder ? '#F59E0B' : '#10B981';
+    const fillColor = isPos
+      ? 'rgba(239, 68, 68, 0.18)'
+      : isBorder
+      ? 'rgba(245, 158, 11, 0.18)'
+      : 'rgba(16, 185, 129, 0.12)';
+
+    // Subtle colored translucent tint inside the well
+    visCtx.beginPath();
+    visCtx.arc(w.cx, w.cy, w.radius, 0, 2 * Math.PI);
+    visCtx.fillStyle = fillColor;
+    visCtx.fill();
+
+    // Prominent border ring
+    visCtx.lineWidth = Math.max(2, Math.round(w.radius * 0.12));
+    visCtx.strokeStyle = strokeColor;
+    visCtx.stroke();
+
+    // High-contrast text label with dark drop shadow for readability
+    visCtx.save();
+    visCtx.fillStyle = '#FFFFFF';
+    visCtx.font = `bold ${Math.round(w.radius * 0.45)}px sans-serif`;
+    visCtx.textAlign = 'center';
+    visCtx.textBaseline = 'middle';
+    visCtx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+    visCtx.shadowBlur = 4;
+    visCtx.fillText(`${w.predictedOd.toFixed(2)}`, w.cx, w.cy);
+    visCtx.restore();
+  }
+
+  return visCanvas.toDataURL('image/jpeg', 0.85);
+}
+
 export async function processPlateImage(
   imageSource: HTMLImageElement | HTMLCanvasElement,
   numCols = 10,
+  cutoff = 0.300,
   onProgress?: (p: AnalysisProgress) => void,
   metadata?: FarmMetadata
 ): Promise<FullAnalysisOutput> {
@@ -141,31 +190,10 @@ export async function processPlateImage(
     });
 
     // 9. Clinical Diagnostics & Cut-off
-    const { results, summary } = evaluatePlateDiagnostics(rawResults);
+    const { results, summary } = evaluatePlateDiagnostics(rawResults, cutoff);
 
-    // 10. Draw annotated overlay image
-    const visCanvas = document.createElement('canvas');
-    visCanvas.width = width;
-    visCanvas.height = height;
-    const visCtx = visCanvas.getContext('2d')!;
-    visCtx.drawImage(canvas, 0, 0);
-
-    for (const w of results) {
-      visCtx.beginPath();
-      visCtx.arc(w.cx, w.cy, w.radius, 0, 2 * Math.PI);
-      visCtx.lineWidth = Math.max(2, Math.round(w.radius * 0.12));
-      visCtx.strokeStyle = w.status === 'POSITIVE' ? '#EF4444' : w.status === 'BORDERLINE' ? '#F59E0B' : '#10B981';
-      visCtx.stroke();
-
-      // Text label
-      visCtx.fillStyle = '#FFFFFF';
-      visCtx.font = `bold ${Math.round(w.radius * 0.45)}px sans-serif`;
-      visCtx.textAlign = 'center';
-      visCtx.textBaseline = 'middle';
-      visCtx.fillText(`${w.predictedOd.toFixed(2)}`, w.cx, w.cy);
-    }
-
-    const annotatedImageUrl = visCanvas.toDataURL('image/jpeg', 0.85);
+    // 10. Draw annotated overlay image using manual cutoff
+    const annotatedImageUrl = renderAnnotatedPlateOverlay(canvas, results, cutoff);
     const durationMs = Date.now() - startTime;
 
     // 11. Compute optical illumination & geometry quality metrics
@@ -214,6 +242,7 @@ export async function processPlateImage(
       results,
       summary,
       annotatedImageUrl,
+      baseCanvas: canvas,
       numCols,
       durationMs,
       quality,

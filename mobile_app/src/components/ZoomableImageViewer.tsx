@@ -4,11 +4,13 @@ import { ZoomIn, ZoomOut, RotateCcw, Move } from 'lucide-react';
 interface ZoomableImageViewerProps {
   imageUrl: string;
   alt?: string;
+  resetKey?: string;
 }
 
 export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
   imageUrl,
   alt = 'Detection Result',
+  resetKey,
 }) => {
   const [scale, setScale] = useState<number>(1);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -111,10 +113,10 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
     lastTouchDistRef.current = null;
   };
 
-  // Reset position when image changes
+  // Reset position when resetKey changes (or imageUrl if resetKey not specified)
   useEffect(() => {
     handleReset();
-  }, [imageUrl]);
+  }, [resetKey ?? imageUrl]);
 
   return (
     <div
