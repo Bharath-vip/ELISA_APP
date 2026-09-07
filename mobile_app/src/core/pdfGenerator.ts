@@ -1,12 +1,13 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import type { WellResult, DiagnosticsSummary, FarmMetadata } from './types';
+﻿import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
+import type { WellResult, DiagnosticsSummary } from './types';
 
 export async function generateClinicalPdfReport(
   results: WellResult[],
   summary: DiagnosticsSummary,
-  farmName = 'AquaFarm Sector 3 - Pond B',
-  plateName = 'Plate 0002',
-  metadata?: FarmMetadata
+  plateName = 'Plate Analysis'
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]); // A4
@@ -18,13 +19,13 @@ export async function generateClinicalPdfReport(
   // Header Banner
   page.drawRectangle({
     x: 0,
-    y: height - 80,
+    y: height - 70,
     width: width,
-    height: 80,
-    color: rgb(0.06, 0.09, 0.16), // #0F172A
+    height: 70,
+    color: rgb(0.08, 0.12, 0.20),
   });
 
-  page.drawText('WSSA POINT-OF-CARE DIAGNOSTIC CERTIFICATE', {
+  page.drawText('ELISA PLATE DIAGNOSTIC REPORT', {
     x: 36,
     y: height - 42,
     size: 16,
@@ -32,67 +33,54 @@ export async function generateClinicalPdfReport(
     color: rgb(1, 1, 1),
   });
 
-  page.drawText('White Spot Syndrome Assay (WSSA) • AI Mobile Edge Reader', {
+  page.drawText('96-Well Microplate Optical Density (OD) Quantification', {
     x: 36,
-    y: height - 60,
-    size: 10,
+    y: height - 58,
+    size: 9.5,
     font: fontRegular,
-    color: rgb(0.23, 0.51, 0.96),
+    color: rgb(0.38, 0.65, 0.98),
   });
 
   // Metadata Box
-  let curY = height - 115;
-  const fName = metadata?.farmName || farmName;
-  const pId = metadata?.pondId || 'Pond 03';
-  page.drawText(`Facility:  ${fName} (${pId})`, { x: 36, y: curY, size: 9.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`Plate ID:        ${plateName}`, { x: 320, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-  curY -= 16;
-  const spec = metadata?.species || 'Penaeus vannamei';
-  const tech = metadata?.technicianName || 'Field Biologist';
-  page.drawText(`Species:   ${spec}`, { x: 36, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`Technician:      ${tech}`, { x: 320, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-  curY -= 16;
-  page.drawText(`Date & Time:      ${new Date().toLocaleString()}`, { x: 36, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`Diagnostic Mode: 100% Offline Mobile AI`, { x: 320, y: curY, size: 9.5, font: fontRegular, color: rgb(0.1, 0.1, 0.1) });
+  let curY = height - 95;
+  page.drawText(`Sample / Plate: ${plateName}`, { x: 36, y: curY, size: 10, font: fontBold, color: rgb(0.15, 0.15, 0.15) });
+  page.drawText(`Date: ${new Date().toLocaleString()}`, { x: 340, y: curY, size: 9.5, font: fontRegular, color: rgb(0.3, 0.3, 0.3) });
 
-  // Outbreak Status Banner
+  // Summary Banner
   curY -= 35;
-  const isOutbreak = summary.outbreakAlert;
+  const isPos = summary.outbreakAlert;
   page.drawRectangle({
     x: 36,
     y: curY - 10,
     width: width - 72,
-    height: 40,
-    color: isOutbreak ? rgb(0.99, 0.93, 0.93) : rgb(0.93, 0.99, 0.94),
-    borderColor: isOutbreak ? rgb(0.86, 0.15, 0.15) : rgb(0.13, 0.65, 0.28),
-    borderWidth: 1.5,
+    height: 36,
+    color: isPos ? rgb(0.99, 0.93, 0.93) : rgb(0.93, 0.99, 0.94),
+    borderColor: isPos ? rgb(0.86, 0.15, 0.15) : rgb(0.13, 0.65, 0.28),
+    borderWidth: 1,
   });
 
   page.drawText(
-    isOutbreak ? '⚠️ OUTBREAK ALERT: WHITE SPOT SYNDROME VIRUS (WSSV) DETECTED' : '✅ BIOSECURE: NO PATHOGENS DETECTED',
+    isPos
+      ? `STATUS: POSITIVE DETECTED (${summary.positiveCount} of ${summary.totalWells} wells above cutoff)`
+      : `STATUS: ALL NEGATIVE (${summary.negativeCount} of ${summary.totalWells} wells healthy)`,
     {
       x: 48,
-      y: curY + 12,
+      y: curY + 4,
       size: 11,
       font: fontBold,
-      color: isOutbreak ? rgb(0.75, 0.1, 0.1) : rgb(0.1, 0.5, 0.2),
+      color: isPos ? rgb(0.75, 0.1, 0.1) : rgb(0.1, 0.5, 0.2),
     }
   );
 
-  page.drawText(
-    `Safety Cut-Off: ${summary.cutoffValue.toFixed(3)} OD  |  Infected Wells: ${summary.positiveCount}  |  Healthy Wells: ${summary.negativeCount}  |  Total Analyzed: ${summary.totalWells}`,
-    {
-      x: 48,
-      y: curY - 2,
-      size: 9,
-      font: fontRegular,
-      color: rgb(0.3, 0.3, 0.3),
-    }
-  );
+  // Key Statistics
+  curY -= 35;
+  page.drawText(`Negative Baseline: ${summary.meanNeg.toFixed(4)} OD`, { x: 36, y: curY, size: 9.5, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
+  page.drawText(`Standard Deviation: ${summary.sdNeg.toFixed(4)}`, { x: 210, y: curY, size: 9.5, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
+  page.drawText(`Cutoff Threshold: ${summary.cutoffValue.toFixed(4)} OD`, { x: 380, y: curY, size: 9.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
 
-  // Microplate OD Table Header
-  curY -= 45;
-  page.drawText('Predicted Optical Density (OD) Numerical Matrix (450 nm - 620 nm)', {
+  // 8x12 Matrix Table
+  curY -= 30;
+  page.drawText('Predicted Optical Density Matrix (450 nm)', {
     x: 36,
     y: curY,
     size: 11,
@@ -100,78 +88,74 @@ export async function generateClinicalPdfReport(
     color: rgb(0.1, 0.1, 0.1),
   });
 
-  curY -= 20;
-  const colWidth = 38;
-  const rowHeight = 16;
-  const startX = 40;
+  curY -= 15;
+  const startX = 36;
+  const colW = 40;
+  const rowH = 18;
 
-  // Header Col Numbers
+  // Column headers
+  page.drawText('Row', { x: startX + 4, y: curY, size: 8, font: fontBold, color: rgb(0.4, 0.4, 0.4) });
   for (let c = 1; c <= 12; c++) {
-    page.drawText(c.toString(), {
-      x: startX + c * colWidth - 8,
+    page.drawText(`${c}`, {
+      x: startX + 30 + (c - 1) * colW + 12,
       y: curY,
       size: 8,
       font: fontBold,
-      color: rgb(0.3, 0.3, 0.3),
+      color: rgb(0.4, 0.4, 0.4),
     });
   }
 
-  // Rows A - H
-  const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-  const resultMap = new Map<string, WellResult>();
-  for (const r of results) {
-    resultMap.set(`${r.row}_${r.col}`, r);
-  }
+  const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
+  for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+    const rowLetter = rows[rIdx];
+    const yPos = curY - 14 - rIdx * rowH;
 
-  for (let rIdx = 0; rIdx < 8; rIdx++) {
-    const rLetter = rows[rIdx];
-    curY -= rowHeight;
-
-    page.drawText(rLetter, {
-      x: startX - 10,
-      y: curY + 2,
-      size: 9,
+    page.drawText(rowLetter, {
+      x: startX + 8,
+      y: yPos + 4,
+      size: 8.5,
       font: fontBold,
       color: rgb(0.2, 0.2, 0.2),
     });
 
     for (let c = 1; c <= 12; c++) {
-      const well = resultMap.get(`${rLetter}_${c}`);
-      const valStr = well ? well.predictedOd.toFixed(2) : '-';
-      const isPos = well ? well.predictedOd > summary.cutoffValue : false;
+      const well = results.find((w) => w.row === rowLetter && w.col === c);
+      const cellX = startX + 30 + (c - 1) * colW;
 
-      page.drawText(valStr, {
-        x: startX + c * colWidth - 14,
-        y: curY + 2,
-        size: 7.5,
-        font: fontRegular,
-        color: isPos ? rgb(0.85, 0.1, 0.1) : rgb(0.1, 0.1, 0.1),
-      });
+      if (well) {
+        const wellIsPos = well.predictedOd > summary.cutoffValue;
+        page.drawRectangle({
+          x: cellX + 1,
+          y: yPos,
+          width: colW - 2,
+          height: rowH - 2,
+          color: wellIsPos ? rgb(0.99, 0.90, 0.90) : rgb(0.95, 0.97, 0.99),
+        });
+
+        page.drawText(well.predictedOd.toFixed(2), {
+          x: cellX + 8,
+          y: yPos + 4,
+          size: 8,
+          font: wellIsPos ? fontBold : fontRegular,
+          color: wellIsPos ? rgb(0.8, 0.1, 0.1) : rgb(0.15, 0.15, 0.15),
+        });
+      }
     }
   }
 
-  // Compliance & Standard Footnote
-  curY -= 50;
+  // Footer
+  const footerY = 40;
   page.drawLine({
-    start: { x: 36, y: curY },
-    end: { x: width - 36, y: curY },
-    color: rgb(0.8, 0.8, 0.8),
+    start: { x: 36, y: footerY + 12 },
+    end: { x: width - 36, y: footerY + 12 },
+    color: rgb(0.85, 0.85, 0.85),
     thickness: 0.5,
   });
 
-  curY -= 18;
-  page.drawText('WOAH Manual of Diagnostic Tests for Aquatic Animals • Protocol 3-SD Negative Baseline', {
+  page.drawText('Automated ELISA Plate Reader • Standard 3-SD Negative Cutoff Protocol', {
     x: 36,
-    y: curY,
+    y: footerY,
     size: 8,
-    font: fontRegular,
-    color: rgb(0.4, 0.4, 0.4),
-  });
-
-  page.drawText('Generated completely on-device via AI Mobile ELISA Diagnostic Suite (YOLOv8 + ExtraTrees)', {
-    x: 36,
-    y: curY - 12,
-    size: 7.5,
     font: fontRegular,
     color: rgb(0.5, 0.5, 0.5),
   });
@@ -179,14 +163,47 @@ export async function generateClinicalPdfReport(
   return await pdfDoc.save();
 }
 
-export function downloadPdf(bytes: Uint8Array, filename = 'WSSA_Diagnostic_Report.pdf') {
-  const blob = new Blob([bytes as any], { type: 'application/pdf' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+export async function downloadPdf(bytes: Uint8Array, filename = 'ELISA_Report.pdf'): Promise<void> {
+  // 1. If running natively in Capacitor (Android phone)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      let binary = '';
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64Data = btoa(binary);
+
+      const saved = await Filesystem.writeFile({
+        path: filename,
+        data: base64Data,
+        directory: Directory.Cache,
+      });
+
+      await Share.share({
+        title: filename,
+        text: 'ELISA Diagnostic Report',
+        url: saved.uri,
+        dialogTitle: 'Save or Share PDF Report',
+      });
+      return;
+    } catch (err) {
+      console.warn('Capacitor native share failed, falling back:', err);
+    }
+  }
+
+  // 2. Standard Browser Download
+  try {
+    const blob = new Blob([bytes as any], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+  } catch (e) {
+    console.error('Browser PDF download error:', e);
+  }
 }
