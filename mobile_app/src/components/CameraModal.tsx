@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, X, RefreshCw, Flashlight, Smartphone } from 'lucide-react';
+import { Camera, X, RefreshCw, Flashlight, Smartphone, RotateCcw } from 'lucide-react';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -16,6 +16,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
   const [currentDeviceIndex, setCurrentDeviceIndex] = useState<number>(0);
+  const [isRotated, setIsRotated] = useState<boolean>(false);
 
   // Hardware torch state
   const [torchOn, setTorchOn] = useState<boolean>(false);
@@ -161,8 +162,9 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
     const vw = video.videoWidth || 1920;
     const vh = video.videoHeight || 1080;
 
-    // Guarantee landscape orientation (Width >= Height)
-    if (vh > vw) {
+    if (isRotated) {
+      // Plate was aligned vertically (8 cols wide x 12 rows tall)
+      // Rotate 90 degrees clockwise to normalize into standard 12 cols wide x 8 rows tall
       canvas.width = vh;
       canvas.height = vw;
       const ctx = canvas.getContext('2d')!;
@@ -170,16 +172,26 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
       ctx.rotate((90 * Math.PI) / 180);
       ctx.drawImage(video, -vw / 2, -vh / 2, vw, vh);
     } else {
-      canvas.width = vw;
-      canvas.height = vh;
-      const ctx = canvas.getContext('2d')!;
-      ctx.drawImage(video, 0, 0, vw, vh);
+      // Plate was aligned in standard horizontal box
+      if (vh > vw) {
+        canvas.width = vh;
+        canvas.height = vw;
+        const ctx = canvas.getContext('2d')!;
+        ctx.translate(vh / 2, vw / 2);
+        ctx.rotate((90 * Math.PI) / 180);
+        ctx.drawImage(video, -vw / 2, -vh / 2, vw, vh);
+      } else {
+        canvas.width = vw;
+        canvas.height = vh;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(video, 0, 0, vw, vh);
+      }
     }
 
     stopCamera();
     onCapture(canvas);
     onClose();
-  }, [onCapture, onClose, stopCamera]);
+  }, [isRotated, onCapture, onClose, stopCamera]);
 
   // Native System Camera Fallback Handler
   const handleSystemCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -195,8 +207,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
         const vw = img.naturalWidth || img.width;
         const vh = img.naturalHeight || img.height;
 
-        // Guarantee landscape orientation
-        if (vh > vw) {
+        if (isRotated) {
           canvas.width = vh;
           canvas.height = vw;
           const ctx = canvas.getContext('2d')!;
@@ -204,10 +215,19 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
           ctx.rotate((90 * Math.PI) / 180);
           ctx.drawImage(img, -vw / 2, -vh / 2, vw, vh);
         } else {
-          canvas.width = vw;
-          canvas.height = vh;
-          const ctx = canvas.getContext('2d')!;
-          ctx.drawImage(img, 0, 0, vw, vh);
+          if (vh > vw) {
+            canvas.width = vh;
+            canvas.height = vw;
+            const ctx = canvas.getContext('2d')!;
+            ctx.translate(vh / 2, vw / 2);
+            ctx.rotate((90 * Math.PI) / 180);
+            ctx.drawImage(img, -vw / 2, -vh / 2, vw, vh);
+          } else {
+            canvas.width = vw;
+            canvas.height = vh;
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0, vw, vh);
+          }
         }
 
         stopCamera();
@@ -245,17 +265,31 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
           <X className="w-5 h-5" />
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          {/* Rotate Reticle Toggle */}
+          <button
+            onClick={() => setIsRotated((prev) => !prev)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold active:scale-95 transition-all shadow-md ${
+              isRotated
+                ? 'bg-amber-500 text-slate-950 font-bold shadow-amber-500/20'
+                : 'bg-slate-800 text-white hover:bg-slate-700'
+            }`}
+            title="Rotate Reticle 90 Degrees"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>{isRotated ? '8×12 (Vert)' : '12×8 (Horiz)'}</span>
+          </button>
+
           {/* Flip / Cycle Camera */}
           <button
             onClick={switchCamera}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 text-white text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all shadow-md"
+            className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-slate-800 text-white text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all shadow-md"
             title="Switch Camera Sensor"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>
               {availableDevices.length > 1
-                ? `Camera ${currentDeviceIndex + 1}/${availableDevices.length}`
+                ? `${currentDeviceIndex + 1}/${availableDevices.length}`
                 : facingMode === 'environment'
                 ? 'Rear'
                 : 'Front'}
@@ -266,7 +300,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
           {hasTorch && (
             <button
               onClick={toggleTorch}
-              className={`p-2.5 rounded-xl border transition-all shadow-md ${
+              className={`p-2 rounded-xl border transition-all shadow-md ${
                 torchOn
                   ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
                   : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
@@ -280,11 +314,11 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
           {/* Direct System Camera Trigger */}
           <button
             onClick={() => fallbackInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-semibold active:scale-95 transition-all shadow-md"
+            className="flex items-center gap-1 px-2.5 py-2 rounded-xl bg-sky-600/90 hover:bg-sky-500 text-white text-xs font-semibold active:scale-95 transition-all shadow-md"
             title="Open Phone's Native Camera"
           >
             <Smartphone className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">System Camera</span>
+            <span className="hidden xs:inline">System</span>
           </button>
         </div>
       </div>
@@ -312,42 +346,76 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
               className="absolute inset-0 w-full h-full object-cover"
             />
 
-            {/* High-Contrast Landscape 1.5:1 (12:8) Reticle Overlay */}
-            <div className="relative pointer-events-none w-[90%] max-w-2xl aspect-[1.5/1] rounded-2xl border-2 border-dashed border-sky-400/80 bg-slate-950/20 shadow-2xl flex flex-col justify-between p-3.5 backdrop-blur-[1px]">
+            {/* Dynamic Reticle Overlay: Standard 12:8 (1.5:1) or Rotated 8:12 (1:1.5) */}
+            <div
+              className={`relative pointer-events-none rounded-2xl border-2 border-dashed shadow-2xl flex flex-col justify-between p-3.5 backdrop-blur-[1px] transition-all duration-200 ${
+                isRotated
+                  ? 'border-amber-400/90 bg-amber-950/10 w-[68%] max-w-sm aspect-[1/1.5] max-h-[72vh]'
+                  : 'border-sky-400/80 bg-slate-950/20 w-[90%] max-w-2xl aspect-[1.5/1] max-h-[70vh]'
+              }`}
+            >
               {/* Top Row Label & Guidance */}
               <div className="flex justify-between items-center">
-                <span className="text-[10px] font-mono text-sky-300 font-bold px-2 py-1 bg-slate-950/80 rounded-md border border-sky-500/30">
-                  ROW A (TOP) • 12 COLS
+                <span
+                  className={`text-[10px] font-mono font-bold px-2 py-1 bg-slate-950/90 rounded-md border ${
+                    isRotated
+                      ? 'text-amber-300 border-amber-500/40'
+                      : 'text-sky-300 border-sky-500/30'
+                  }`}
+                >
+                  {isRotated ? 'COL 1–8 (TOP) • 12 ROWS' : 'ROW A (TOP) • 12 COLS'}
                 </span>
                 <span className="text-[9px] font-mono text-slate-300 px-2 py-0.5 bg-black/60 rounded">
-                  96-WELL FORMAT
+                  96-WELL
                 </span>
               </div>
 
               {/* Center Alignment Crosshair */}
-              <div className="self-center flex flex-col items-center gap-1 opacity-70">
-                <div className="w-6 h-0.5 bg-sky-400/60" />
-                <div className="h-6 w-0.5 bg-sky-400/60 -mt-3.5" />
-                <span className="text-[10px] font-sans font-medium text-white/90 bg-black/60 px-2 py-0.5 rounded mt-1">
-                  Hold flat over plate
+              <div className="self-center flex flex-col items-center gap-1 opacity-75">
+                <div className={`w-6 h-0.5 ${isRotated ? 'bg-amber-400/70' : 'bg-sky-400/60'}`} />
+                <div className={`h-6 w-0.5 ${isRotated ? 'bg-amber-400/70' : 'bg-sky-400/60'} -mt-3.5`} />
+                <span className="text-[10px] font-sans font-medium text-white/90 bg-black/70 px-2 py-0.5 rounded mt-1 shadow-sm">
+                  {isRotated ? 'Vertical 8×12 mode' : 'Hold flat over plate'}
                 </span>
               </div>
 
               {/* Bottom Row Label */}
               <div className="flex justify-between items-center">
                 <span className="text-[9px] font-mono text-slate-400 px-1.5 py-0.5 bg-black/60 rounded">
-                  COL 1–12
+                  {isRotated ? 'ROW 12' : 'COL 1–12'}
                 </span>
-                <span className="text-[10px] font-mono text-sky-300 font-bold px-2 py-1 bg-slate-950/80 rounded-md border border-sky-500/30 self-end">
-                  ROW H (BOTTOM)
+                <span
+                  className={`text-[10px] font-mono font-bold px-2 py-1 bg-slate-950/90 rounded-md border self-end ${
+                    isRotated
+                      ? 'text-amber-300 border-amber-500/40'
+                      : 'text-sky-300 border-sky-500/30'
+                  }`}
+                >
+                  {isRotated ? 'COL 1–8 (BOTTOM)' : 'ROW H (BOTTOM)'}
                 </span>
               </div>
 
               {/* Corner brackets */}
-              <div className="absolute -top-1 -left-1 w-5 h-5 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg" />
-              <div className="absolute -top-1 -right-1 w-5 h-5 border-t-4 border-r-4 border-emerald-400 rounded-tr-lg" />
-              <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-4 border-l-4 border-emerald-400 rounded-bl-lg" />
-              <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-4 border-r-4 border-emerald-400 rounded-br-lg" />
+              <div
+                className={`absolute -top-1 -left-1 w-5 h-5 border-t-4 border-l-4 rounded-tl-lg ${
+                  isRotated ? 'border-amber-400' : 'border-emerald-400'
+                }`}
+              />
+              <div
+                className={`absolute -top-1 -right-1 w-5 h-5 border-t-4 border-r-4 rounded-tr-lg ${
+                  isRotated ? 'border-amber-400' : 'border-emerald-400'
+                }`}
+              />
+              <div
+                className={`absolute -bottom-1 -left-1 w-5 h-5 border-b-4 border-l-4 rounded-bl-lg ${
+                  isRotated ? 'border-amber-400' : 'border-emerald-400'
+                }`}
+              />
+              <div
+                className={`absolute -bottom-1 -right-1 w-5 h-5 border-b-4 border-r-4 rounded-br-lg ${
+                  isRotated ? 'border-amber-400' : 'border-emerald-400'
+                }`}
+              />
             </div>
           </>
         )}
@@ -379,9 +447,12 @@ export const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCap
 
         <div className="text-right text-[11px] text-slate-400">
           <span className="font-bold text-white block">Capture</span>
-          <span>Landscape</span>
+          <span className={isRotated ? 'text-amber-400 font-mono text-[10px]' : 'text-slate-500'}>
+            {isRotated ? '8×12 Auto-Norm' : 'Landscape 12×8'}
+          </span>
         </div>
       </div>
     </div>
   );
 };
+

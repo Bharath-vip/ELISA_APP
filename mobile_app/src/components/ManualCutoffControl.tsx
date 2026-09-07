@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Minus, Plus, RotateCcw, Sliders } from 'lucide-react';
 
 interface ManualCutoffControlProps {
@@ -17,21 +17,42 @@ export const ManualCutoffControl: React.FC<ManualCutoffControlProps> = ({
   onReset,
 }) => {
   const step = 0.01;
+  const [localValue, setLocalValue] = useState<string>(currentCutoff.toFixed(3));
+
+  useEffect(() => {
+    setLocalValue(currentCutoff.toFixed(3));
+  }, [currentCutoff]);
 
   const handleDecrement = () => {
-    const next = Math.max(0.05, Math.round((currentCutoff - step) * 1000) / 1000);
+    const next = Math.max(0.01, Math.round((currentCutoff - step) * 1000) / 1000);
+    setLocalValue(next.toFixed(3));
     onCutoffChange(next);
   };
 
   const handleIncrement = () => {
-    const next = Math.min(3.0, Math.round((currentCutoff + step) * 1000) / 1000);
+    const next = Math.min(4.0, Math.round((currentCutoff + step) * 1000) / 1000);
+    setLocalValue(next.toFixed(3));
     onCutoffChange(next);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    if (!isNaN(val) && val >= 0.01 && val <= 4.0) {
+    const raw = e.target.value;
+    setLocalValue(raw);
+
+    const val = parseFloat(raw);
+    if (!isNaN(val) && val >= 0.01 && val <= 5.0) {
       onCutoffChange(Math.round(val * 1000) / 1000);
+    }
+  };
+
+  const handleInputBlur = () => {
+    const val = parseFloat(localValue);
+    if (!isNaN(val) && val >= 0.01 && val <= 5.0) {
+      const rounded = Math.round(val * 1000) / 1000;
+      setLocalValue(rounded.toFixed(3));
+      onCutoffChange(rounded);
+    } else {
+      setLocalValue(currentCutoff.toFixed(3));
     }
   };
 
@@ -63,13 +84,17 @@ export const ManualCutoffControl: React.FC<ManualCutoffControlProps> = ({
         </button>
 
         <input
-          type="number"
-          step="0.005"
-          min="0.05"
-          max="3.0"
-          value={currentCutoff.toFixed(3)}
+          type="text"
+          inputMode="decimal"
+          value={localValue}
           onChange={handleInputChange}
-          className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-1.5 py-1 text-center text-xs font-mono font-bold text-white focus:outline-none focus:border-sky-500"
+          onBlur={handleInputBlur}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          className="w-18 bg-slate-950 border border-slate-700 rounded-lg px-1.5 py-1 text-center text-xs font-mono font-bold text-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
         />
 
         <button
